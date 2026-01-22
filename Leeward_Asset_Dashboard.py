@@ -90,7 +90,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# YES Energy credentials from Streamlit secrets
+# YES Energy from Streamlit secrets
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
 
@@ -129,14 +129,13 @@ CAISO_NODES = {
 
 
 def get_current_he():
-    """Get current Hour Ending""""
+    
     now = datetime.now(ZoneInfo("America/Chicago"))
     return now.hour + 1
 
 
 def parse_yes_html_table(html_text):
-    """Parse YES Energy HTML table response into DataFrame.
-    Returns None if parsing fails (caller should handle this)."""
+
     if not html_text or not isinstance(html_text, str):
         return None
     
@@ -164,19 +163,18 @@ def parse_yes_html_table(html_text):
     return None
 
 
-# ============================================================================
-# YES Energy API Functions
-# ============================================================================
+
+# YES Energy API
+
 
 class DataFetchError(Exception):
-    """Raised when data fetch fails - exceptions bypass st.cache_data"""
+    
     pass
 
 
 @st.cache_data(ttl=30)
 def fetch_rt_5min(objectid, date_str):
-    """Fetch 5-min RT LMP from YES Energy timeseries API.
-    Raises DataFetchError on failure so None results aren't cached."""
+
     try:
         dt = datetime.strptime(date_str, '%Y-%m-%d')
         yes_date = dt.strftime('%m/%d/%Y')
@@ -212,8 +210,7 @@ def fetch_rt_5min(objectid, date_str):
 
 @st.cache_data(ttl=60)
 def fetch_da_hourly(objectid, date_str):
-    """Fetch hourly DA LMP from YES Energy timeseries API.
-    Raises DataFetchError on failure so None results aren't cached."""
+
     try:
         dt = datetime.strptime(date_str, '%Y-%m-%d')
         yes_date = dt.strftime('%m/%d/%Y')
@@ -245,9 +242,9 @@ def fetch_da_hourly(objectid, date_str):
         raise DataFetchError(f"DA fetch failed: {e}")
 
 
-# ============================================================================
-# Display Functions
-# ============================================================================
+
+# Display 
+
 
 def render_price_boxes(display_name, da_price, rt_price):
     """Render the DA and RT price boxes for a node"""
@@ -274,7 +271,7 @@ def render_price_boxes(display_name, da_price, rt_price):
 
 
 def create_price_chart(da_df, rt_5min_df):
-    """Create a Plotly chart with DA and RT prices"""
+    
     fig = go.Figure()
     
     # RT 5-min data
@@ -290,7 +287,7 @@ def create_price_chart(da_df, rt_5min_df):
             )
         )
     
-    # DA hourly data as step function
+    # DA hourly data 
     if da_df is not None and not da_df.empty:
         da_x = []
         da_y = []
@@ -352,7 +349,7 @@ def create_price_chart(da_df, rt_5min_df):
 
 
 def render_node(display_name, objectid, date_str, current_he):
-    """Render a single node panel with price boxes and chart"""
+    
     node_key = str(objectid)
     
     # Fetch RT data with fallback
@@ -429,7 +426,7 @@ def render_caiso_tab():
 
 
 def _get_rt_price_with_fallback(objectid, date_str):
-    """Helper to fetch RT price with session state fallback."""
+   
     node_key = str(objectid)
     try:
         _, current_rt = fetch_rt_5min(objectid, date_str)
@@ -440,12 +437,12 @@ def _get_rt_price_with_fallback(objectid, date_str):
 
 
 def render_all_rt_tab():
-    """Render All-RT tab with 3 columns showing all assets and RT prices"""
+    
     date_str = datetime.now().strftime('%Y-%m-%d')
     
     col1, col2, col3 = st.columns(3)
     
-    # Custom CSS for this tab
+    
     st.markdown("""
     <style>
         .rt-header {
@@ -520,7 +517,7 @@ def main():
     
     seconds_until_refresh = int((next_5min_refresh - now).total_seconds())
     
-    # Inject HTML meta refresh tag
+    
     st.markdown(f'<meta http-equiv="refresh" content="{seconds_until_refresh}">', unsafe_allow_html=True)
     
     col1, col2 = st.columns([6, 1])
