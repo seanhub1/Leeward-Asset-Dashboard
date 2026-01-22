@@ -129,8 +129,8 @@ CAISO_NODES = {
 
 
 def get_current_he():
-    """Get current Hour Ending. 11:09 AM = HE12, 12:03 AM = HE1"""
-    now = datetime.now()
+    """Get current Hour Ending""""
+    now = datetime.now(ZoneInfo("America/Chicago"))
     return now.hour + 1
 
 
@@ -505,7 +505,7 @@ def render_all_rt_tab():
 def main():
     st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
     
-    now = datetime.now()
+    now = datetime.now(ZoneInfo("America/Chicago"))
     current_he = get_current_he()
     
     # Calculate next 5-min interval refresh time
