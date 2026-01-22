@@ -5,6 +5,12 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 import re
+import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Timezone for Central Time
 CENTRAL_TZ = ZoneInfo("America/Chicago")
@@ -97,14 +103,6 @@ st.markdown("""
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
 
-# Initialize session state for storing last known good data
-if 'last_rt_data' not in st.session_state:
-    st.session_state.last_rt_data = {}
-if 'last_da_data' not in st.session_state:
-    st.session_state.last_da_data = {}
-if 'last_rt_price' not in st.session_state:
-    st.session_state.last_rt_price = {}
-
 # All nodes with YES Energy object IDs
 ERCOT_NODES = {
     "Horizon Solar": 10017137187,
@@ -130,16 +128,21 @@ CAISO_NODES = {
     "Kumeyaay Wind": 20000004301,
 }
 
+# API Configuration
+API_TIMEOUT = 30
+API_RETRY_ATTEMPTS = 3
+API_RETRY_DELAY = 2  # seconds between retries
+
 
 def get_current_he():
-    """Get current Hour Ending. 11:09 AM = HE12, 12:03 AM = HE1"""
+    """Get current Hour Ending. 4:00 PM (hour 16) = HE17, 12:00 AM (hour 0) = HE1"""
     now = datetime.now(CENTRAL_TZ)
     return now.hour + 1
 
 
 def parse_yes_html_table(html_text):
     """Parse YES Energy HTML table response into DataFrame.
-    Returns None if parsing fails (caller should handle this)."""
+    Returns None if parsing fails."""
     if not html_text or not isinstance(html_text, str):
         return None
     
@@ -167,85 +170,96 @@ def parse_yes_html_table(html_text):
     return None
 
 
+def _fetch_with_retry(url: str, description: str) -> requests.Response:
+    """Fetch URL with retry logic. Returns response or raises Exception after all retries fail."""
+    last_error = None
+    
+    for attempt in range(1, API_RETRY_ATTEMPTS + 1):
+        try:
+            response = requests.get(url, auth=YES_AUTH, timeout=API_TIMEOUT)
+            if response.ok:
+                return response
+            else:
+                last_error = f"{description} returned HTTP {response.status_code}"
+                logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+        except requests.exceptions.Timeout:
+            last_error = f"{description} timed out after {API_TIMEOUT}s"
+            logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+        except requests.exceptions.RequestException as e:
+            last_error = f"{description} request failed: {e}"
+            logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+        
+        # Wait before retry (except on last attempt)
+        if attempt < API_RETRY_ATTEMPTS:
+            time.sleep(API_RETRY_DELAY)
+    
+    raise Exception(last_error)
+
+
 # ============================================================================
 # YES Energy API Functions
+# Cache TTL must be longer than refresh interval (5 min = 300s)
+# Using 10 min TTL so cached data survives if one refresh cycle fails
 # ============================================================================
 
-class DataFetchError(Exception):
-    """Raised when data fetch fails - exceptions bypass st.cache_data"""
-    pass
-
-
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=600)  # 10 min TTL for RT data
 def fetch_rt_5min(objectid, date_str):
     """Fetch 5-min RT LMP from YES Energy timeseries API.
-    Raises DataFetchError on failure so None results aren't cached."""
-    try:
-        dt = datetime.strptime(date_str, '%Y-%m-%d')
-        yes_date = dt.strftime('%m/%d/%Y')
-        
-        url = f"{YES_BASE}/timeseries/RTLMP/{objectid}?agglevel=5MIN&startdate={yes_date}&enddate={yes_date}"
-        
-        response = requests.get(url, auth=YES_AUTH, timeout=30)
-        if not response.ok:
-            raise DataFetchError(f"RT API returned {response.status_code}")
-        
-        df = parse_yes_html_table(response.text)
-        if df is None or df.empty:
-            raise DataFetchError("RT parse returned empty data")
-        
-        df['datetime'] = pd.to_datetime(df['DATETIME'])
-        df['RT_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
-        df['time_hrs'] = df['datetime'].dt.hour + df['datetime'].dt.minute / 60.0
-        df = df.sort_values('datetime')  # Sort by actual datetime, not time_hrs
-        
-        # Get the latest non-NaN price
-        valid_prices = df.dropna(subset=['RT_Price'])
-        if valid_prices.empty:
-            raise DataFetchError("No valid RT prices found")
-        
-        latest = valid_prices['RT_Price'].iloc[-1]
-        
-        return df[['time_hrs', 'RT_Price']].copy(), latest
-    except DataFetchError:
-        raise
-    except Exception as e:
-        raise DataFetchError(f"RT fetch failed: {e}")
+    Returns (DataFrame, latest_price) tuple or raises Exception."""
+    dt = datetime.strptime(date_str, '%Y-%m-%d')
+    yes_date = dt.strftime('%m/%d/%Y')
+    
+    url = f"{YES_BASE}/timeseries/RTLMP/{objectid}?agglevel=5MIN&startdate={yes_date}&enddate={yes_date}"
+    
+    response = _fetch_with_retry(url, f"RT API for {objectid}")
+    
+    df = parse_yes_html_table(response.text)
+    if df is None or df.empty:
+        raise Exception(f"RT parse returned empty data for {objectid}")
+    
+    df['datetime'] = pd.to_datetime(df['DATETIME'])
+    df['RT_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
+    df['time_hrs'] = df['datetime'].dt.hour + df['datetime'].dt.minute / 60.0
+    df = df.sort_values('datetime')
+    
+    # Get the latest non-NaN price
+    valid_prices = df.dropna(subset=['RT_Price'])
+    if valid_prices.empty:
+        raise Exception(f"No valid RT prices found for {objectid}")
+    
+    latest = valid_prices['RT_Price'].iloc[-1]
+    
+    logger.info(f"RT fetch success for {objectid}: latest=${latest:.2f}, {len(df)} rows")
+    return df[['time_hrs', 'RT_Price']].copy(), latest
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=600)  # 10 min TTL for DA data (doesn't change intraday)
 def fetch_da_hourly(objectid, date_str):
     """Fetch hourly DA LMP from YES Energy timeseries API.
-    Raises DataFetchError on failure so None results aren't cached."""
-    try:
-        dt = datetime.strptime(date_str, '%Y-%m-%d')
-        yes_date = dt.strftime('%m/%d/%Y')
-        
-        url = f"{YES_BASE}/timeseries/DALMP/{objectid}?agglevel=HOUR&startdate={yes_date}&enddate={yes_date}"
-        
-        response = requests.get(url, auth=YES_AUTH, timeout=30)
-        if not response.ok:
-            raise DataFetchError(f"DA API returned {response.status_code}")
-        
-        df = parse_yes_html_table(response.text)
-        if df is None or df.empty:
-            raise DataFetchError("DA parse returned empty data")
-        
-        df['datetime'] = pd.to_datetime(df['DATETIME'])
-        df['DA_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
-        
-        if 'HOURENDING' in df.columns:
-            df['HE'] = pd.to_numeric(df['HOURENDING'], errors='coerce')
-        else:
-            df['HE'] = df['datetime'].dt.hour + 1
-        
-        df = df.sort_values('HE')
-        
-        return df[['HE', 'DA_Price']].copy()
-    except DataFetchError:
-        raise
-    except Exception as e:
-        raise DataFetchError(f"DA fetch failed: {e}")
+    Returns DataFrame or raises Exception."""
+    dt = datetime.strptime(date_str, '%Y-%m-%d')
+    yes_date = dt.strftime('%m/%d/%Y')
+    
+    url = f"{YES_BASE}/timeseries/DALMP/{objectid}?agglevel=HOUR&startdate={yes_date}&enddate={yes_date}"
+    
+    response = _fetch_with_retry(url, f"DA API for {objectid}")
+    
+    df = parse_yes_html_table(response.text)
+    if df is None or df.empty:
+        raise Exception(f"DA parse returned empty data for {objectid}")
+    
+    df['datetime'] = pd.to_datetime(df['DATETIME'])
+    df['DA_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
+    
+    if 'HOURENDING' in df.columns:
+        df['HE'] = pd.to_numeric(df['HOURENDING'], errors='coerce')
+    else:
+        df['HE'] = df['datetime'].dt.hour + 1
+    
+    df = df.sort_values('HE')
+    
+    logger.info(f"DA fetch success for {objectid}: {len(df)} hours")
+    return df[['HE', 'DA_Price']].copy()
 
 
 # ============================================================================
@@ -365,28 +379,22 @@ def create_price_chart(da_df, rt_5min_df):
 
 def render_node(display_name, objectid, date_str, current_he):
     """Render a single node panel with price boxes and chart"""
-    node_key = str(objectid)
-    
-    # Fetch RT data with fallback
+    # Fetch RT data
     rt_5min_df = None
     current_rt = None
     try:
         rt_5min_df, current_rt = fetch_rt_5min(objectid, date_str)
-        st.session_state.last_rt_data[node_key] = rt_5min_df
-        st.session_state.last_rt_price[node_key] = current_rt
-    except DataFetchError:
-        rt_5min_df = st.session_state.last_rt_data.get(node_key)
-        current_rt = st.session_state.last_rt_price.get(node_key)
+    except Exception as e:
+        logger.error(f"RT fetch failed for {display_name}: {e}")
     
-    # Fetch DA data with fallback
+    # Fetch DA data
     da_df = None
     try:
         da_df = fetch_da_hourly(objectid, date_str)
-        st.session_state.last_da_data[node_key] = da_df
-    except DataFetchError:
-        da_df = st.session_state.last_da_data.get(node_key)
+    except Exception as e:
+        logger.error(f"DA fetch failed for {display_name}: {e}")
     
-    # Get current DA price for display
+    # Get current DA price for display (match current HE)
     current_da = None
     if da_df is not None and not da_df.empty:
         da_row = da_df[da_df['HE'] == current_he]
@@ -440,15 +448,13 @@ def render_caiso_tab():
             render_node(display_name, objectid, date_str, current_he)
 
 
-def _get_rt_price_with_fallback(objectid, date_str):
-    """Helper to fetch RT price with session state fallback."""
-    node_key = str(objectid)
+def _get_rt_price(objectid, date_str):
+    """Helper to fetch RT price only."""
     try:
         _, current_rt = fetch_rt_5min(objectid, date_str)
-        st.session_state.last_rt_price[node_key] = current_rt
         return current_rt
-    except DataFetchError:
-        return st.session_state.last_rt_price.get(node_key)
+    except Exception:
+        return None
 
 
 def render_all_rt_tab():
@@ -488,7 +494,7 @@ def render_all_rt_tab():
     def render_iso_column(iso_name, nodes_dict):
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
-            current_rt = _get_rt_price_with_fallback(objectid, date_str)
+            current_rt = _get_rt_price(objectid, date_str)
             
             if current_rt is not None:
                 price_str = f"${current_rt:.2f}"
