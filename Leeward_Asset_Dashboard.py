@@ -6,6 +6,9 @@ from zoneinfo import ZoneInfo
 import plotly.graph_objects as go
 import re
 
+# Timezone for display
+CENTRAL_TZ = ZoneInfo("America/Chicago")
+
 # Page configuration
 st.set_page_config(
     page_title="Leeward Asset Dashboard",
@@ -90,11 +93,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# YES Energy from Streamlit secrets
+# YES Energy creds from Streamlit secrets
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
 
-# Initialize session state for storing last known good data
+# Stores last good data
 if 'last_rt_data' not in st.session_state:
     st.session_state.last_rt_data = {}
 if 'last_da_data' not in st.session_state:
@@ -129,8 +132,8 @@ CAISO_NODES = {
 
 
 def get_current_he():
-    
-    now = datetime.now(ZoneInfo("America/Chicago"))
+
+    now = datetime.now(CENTRAL_TZ)
     return now.hour + 1
 
 
@@ -164,11 +167,11 @@ def parse_yes_html_table(html_text):
 
 
 
-# YES Energy API
+# YES Energy API Functions
 
 
 class DataFetchError(Exception):
-    
+
     pass
 
 
@@ -243,7 +246,7 @@ def fetch_da_hourly(objectid, date_str):
 
 
 
-# Display 
+# Display Functions
 
 
 def render_price_boxes(display_name, da_price, rt_price):
@@ -287,7 +290,7 @@ def create_price_chart(da_df, rt_5min_df):
             )
         )
     
-    # DA hourly data 
+    # DA hourly data
     if da_df is not None and not da_df.empty:
         da_x = []
         da_y = []
@@ -352,7 +355,7 @@ def render_node(display_name, objectid, date_str, current_he):
     
     node_key = str(objectid)
     
-    # Fetch RT data with fallback
+    # Fetch RT data
     rt_5min_df = None
     current_rt = None
     try:
@@ -363,7 +366,7 @@ def render_node(display_name, objectid, date_str, current_he):
         rt_5min_df = st.session_state.last_rt_data.get(node_key)
         current_rt = st.session_state.last_rt_price.get(node_key)
     
-    # Fetch DA data with fallback
+    # Fetch DA data 
     da_df = None
     try:
         da_df = fetch_da_hourly(objectid, date_str)
@@ -385,7 +388,7 @@ def render_node(display_name, objectid, date_str, current_he):
 
 
 def render_ercot_tab():
-    date_str = datetime.now().strftime('%Y-%m-%d')
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
     
     ercot_cols = st.columns(len(ERCOT_NODES))
@@ -396,7 +399,7 @@ def render_ercot_tab():
 
 
 def render_pjm_tab():
-    date_str = datetime.now().strftime('%Y-%m-%d')
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
     
     pjm_list = list(PJM_NODES.items())
@@ -415,7 +418,7 @@ def render_pjm_tab():
 
 
 def render_caiso_tab():
-    date_str = datetime.now().strftime('%Y-%m-%d')
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
     
     caiso_cols = st.columns(len(CAISO_NODES))
@@ -426,7 +429,7 @@ def render_caiso_tab():
 
 
 def _get_rt_price_with_fallback(objectid, date_str):
-   
+    
     node_key = str(objectid)
     try:
         _, current_rt = fetch_rt_5min(objectid, date_str)
@@ -437,8 +440,8 @@ def _get_rt_price_with_fallback(objectid, date_str):
 
 
 def render_all_rt_tab():
-    
-    date_str = datetime.now().strftime('%Y-%m-%d')
+   
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     
     col1, col2, col3 = st.columns(3)
     
@@ -502,7 +505,7 @@ def render_all_rt_tab():
 def main():
     st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
     
-    now = datetime.now(ZoneInfo("America/Chicago"))
+    now = datetime.now(CENTRAL_TZ)
     current_he = get_current_he()
     
     # Calculate next 5-min interval refresh time
@@ -517,7 +520,7 @@ def main():
     
     seconds_until_refresh = int((next_5min_refresh - now).total_seconds())
     
-    
+    #  HTML refresh tag
     st.markdown(f'<meta http-equiv="refresh" content="{seconds_until_refresh}">', unsafe_allow_html=True)
     
     col1, col2 = st.columns([6, 1])
