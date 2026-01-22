@@ -198,11 +198,9 @@ def _fetch_with_retry(url: str, description: str) -> requests.Response:
 
 # ============================================================================
 # YES Energy API Functions
-# Cache TTL must be longer than refresh interval (5 min = 300s)
-# Using 10 min TTL so cached data survives if one refresh cycle fails
 # ============================================================================
 
-@st.cache_data(ttl=600)  # 10 min TTL for RT data
+@st.cache_data(ttl=60)  # 60s TTL - expires before 5-min refresh cycle, ensures fresh RT data
 def fetch_rt_5min(objectid, date_str):
     """Fetch 5-min RT LMP from YES Energy timeseries API.
     Returns (DataFrame, latest_price) tuple or raises Exception."""
@@ -233,7 +231,7 @@ def fetch_rt_5min(objectid, date_str):
     return df[['time_hrs', 'RT_Price']].copy(), latest
 
 
-@st.cache_data(ttl=600)  # 10 min TTL for DA data (doesn't change intraday)
+@st.cache_data(ttl=3600)  # 1 hour TTL - DA prices are hourly, refresh once per hour
 def fetch_da_hourly(objectid, date_str):
     """Fetch hourly DA LMP from YES Energy timeseries API.
     Returns DataFrame or raises Exception."""
