@@ -253,34 +253,43 @@ def fetch_da_hourly(objectid, date_str):
 # ============================================================================
 
 def render_price_boxes(display_name, da_price, rt_price):
-    """Render the DA and RT price boxes for a node"""
-    da_color = "price-green" if da_price and da_price >= 0 else "price-red"
-    rt_color = "price-green" if rt_price and rt_price >= 0 else "price-red"
-    
+    da_color = "price-red"
     da_str = f"${da_price:.2f}" if da_price is not None else "N/A"
+    
+    if rt_price is not None and da_price is not None:
+        rt_color = "price-green" if rt_price >= da_price else "price-red"
+    elif rt_price is not None:
+        rt_color = "price-green"
+    else:
+        rt_color = "price-red"
     rt_str = f"${rt_price:.2f}" if rt_price is not None else "N/A"
     
-    st.markdown(f'''
-    <div class="price-box">
-        <div class="node-label">{display_name}</div>
-        <div class="data-type">Day-Ahead</div>
-        <div class="price-value {da_color}">{da_str}</div>
-    </div>
-    ''', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
     
-    st.markdown(f'''
-    <div class="price-box">
-        <div class="data-type">Real-Time</div>
-        <div class="price-value {rt_color}">{rt_str}</div>
-    </div>
-    ''', unsafe_allow_html=True)
+    with col1:
+        st.markdown(f"""
+        <div class="price-box">
+            <div class="node-label">{display_name}</div>
+            <div class="data-type">DA LMP</div>
+            <div class="price-value {da_color}">{da_str}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="price-box">
+            <div class="node-label">{display_name}</div>
+            <div class="data-type">RT LMP</div>
+            <div class="price-value {rt_color}">{rt_str}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def create_price_chart(da_df, rt_5min_df):
-    """Create a Plotly chart with DA and RT prices"""
+    """Create chart with hourly DA (step) and 5-min RT"""
     fig = go.Figure()
     
-    # RT 5-min data
+    # RT line (white) - 5-min data
     if rt_5min_df is not None and not rt_5min_df.empty:
         fig.add_trace(
             go.Scatter(
@@ -288,17 +297,17 @@ def create_price_chart(da_df, rt_5min_df):
                 y=rt_5min_df['RT_Price'],
                 mode='lines',
                 name='RT',
-                line=dict(color='#00ff00', width=2),
+                line=dict(color='#ffffff', width=2),
                 hovertemplate='%{x:.2f}h<br>RT: $%{y:.2f}<extra></extra>'
             )
         )
     
-    # DA hourly data as step function
+    # DA hourly step line (red)
     if da_df is not None and not da_df.empty:
         da_x = []
         da_y = []
         for _, row in da_df.iterrows():
-            he = row['HE']
+            he = int(row['HE'])
             price = row['DA_Price']
             start_hr = he - 1
             end_hr = he
