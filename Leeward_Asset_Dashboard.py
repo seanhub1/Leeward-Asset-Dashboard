@@ -126,8 +126,8 @@ PJM_NODES = {
     "Mendota Hills": 1552844480,
     "Crescent Ridge": 1552844482,
     "Lone Tree": 2156110042,
-    "GSG Sublette": 2041988725,
-    "GSG Westbrook": 1084391168,
+    "GSG SUB": 2041988725,
+    "GSG WB": 1084391168,
 }
 
 CAISO_NODES = {
