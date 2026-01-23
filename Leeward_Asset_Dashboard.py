@@ -124,7 +124,7 @@ PJM_NODES = {
 
 CAISO_NODES = {
     "White Wing Ranch": 10017280372,
-    "Sierra Pinta Battery": 10018494391,
+    "Sierra Pinta BESS": 10018494391,
     "Kumeyaay Wind": 20000004301,
 }
 
