@@ -126,8 +126,8 @@ PJM_NODES = {
     "Mendota Hills": 1552844480,
     "Crescent Ridge": 1552844482,
     "Lone Tree": 2156110042,
-    "GSG Sublette": 2041988725,
-    "GSG Westbrook": 1084391168,
+    "GSG SUB": 2041988725,
+    "GSG WB": 1084391168,
 }
 
 CAISO_NODES = {
@@ -564,13 +564,13 @@ def main():
     now = datetime.now(CENTRAL_TZ)
     current_he = get_current_he(CENTRAL_TZ)  # Header display uses Central time
     
-    # Calculate next 5-min interval refresh time - use :45 for data availability buffer
+    # Calculate next 5-min interval refresh time - use :55 for data availability buffer
     current_minute = now.minute
     next_5min = ((current_minute // 5) + 1) * 5
     if next_5min >= 60:
-        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=45, microsecond=0)
+        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=55, microsecond=0)
     else:
-        next_5min_refresh = now.replace(minute=next_5min, second=45, microsecond=0)
+        next_5min_refresh = now.replace(minute=next_5min, second=55, microsecond=0)
     if (next_5min_refresh - now).total_seconds() < 5:
         next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
     
