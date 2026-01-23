@@ -68,7 +68,7 @@ st.markdown("""
     .price-box {
         background-color: #0d0d0d;
         border: 1px solid #333;
-        padding: 15px 20px;
+        padding: 10px 8px;
         text-align: center;
         margin-bottom: 5px;
     }
