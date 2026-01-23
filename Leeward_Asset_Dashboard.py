@@ -548,14 +548,14 @@ def main():
     now = datetime.now(CENTRAL_TZ)
     current_he = get_current_he()
     
-    # Calculate next 5-min interval refresh time - use +1:05 for data availability buffer
+    # Calculate next 5-min interval refresh time - use +1:15 for data availability buffer
     current_minute = now.minute
     next_5min = ((current_minute // 5) + 1) * 5
     if next_5min >= 60:
         next_5min_mark = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     else:
         next_5min_mark = now.replace(minute=next_5min, second=0, microsecond=0)
-    next_5min_refresh = next_5min_mark + timedelta(minutes=1, seconds=5)
+    next_5min_refresh = next_5min_mark + timedelta(minutes=1, seconds=15)
     if (next_5min_refresh - now).total_seconds() < 5:
         next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
     
