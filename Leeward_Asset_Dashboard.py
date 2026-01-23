@@ -554,7 +554,7 @@ def main():
     st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
     
     now = datetime.now(CENTRAL_TZ)
-    current_he = get_current_he()
+    current_he = get_current_he(CENTRAL_TZ)  # Header display uses Central time
     
     # Calculate next 5-min interval refresh time - use :45 for data availability buffer
     current_minute = now.minute
