@@ -12,16 +12,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Timezones for each ISO
-CENTRAL_TZ = ZoneInfo("America/Chicago")  # ERCOT
-EASTERN_TZ = ZoneInfo("America/New_York")  # PJM
-PACIFIC_TZ = ZoneInfo("America/Los_Angeles")  # CAISO
-
-ISO_TIMEZONES = {
-    "ERCOT": CENTRAL_TZ,
-    "PJM": EASTERN_TZ,
-    "CAISO": PACIFIC_TZ,
-}
+# Timezone for Central Time
+CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 # Page configuration
 st.set_page_config(
@@ -142,9 +134,9 @@ API_RETRY_ATTEMPTS = 3
 API_RETRY_DELAY = 2  # seconds between retries
 
 
-def get_current_he(tz):
-    """Get current Hour Ending for given timezone. 4:00 PM (hour 16) = HE17, 12:00 AM (hour 0) = HE1"""
-    now = datetime.now(tz)
+def get_current_he():
+    """Get current Hour Ending. 4:00 PM (hour 16) = HE17, 12:00 AM (hour 0) = HE1"""
+    now = datetime.now(CENTRAL_TZ)
     return now.hour + 1
 
 
@@ -209,10 +201,10 @@ def _fetch_with_retry(url: str, description: str, retries: int = None) -> reques
 # YES Energy API Functions
 # ============================================================================
 
-@st.cache_data(ttl=120)  # 2min TTL - reduces API load during tab switching
+@st.cache_data(ttl=120)  # 2min TTL
 def fetch_rt_5min(objectid, date_str, refresh_key):
     """Fetch 5-min RT LMP from YES Energy timeseries API.
-    refresh_key forces cache invalidation on page refresh.
+    refresh_key forces cache invalidation every 5-min window.
     Returns (DataFrame, latest_price) tuple or raises Exception."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
@@ -260,9 +252,9 @@ def fetch_da_hourly(objectid, date_str):
     df['DA_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
     
     if 'HOURENDING' in df.columns:
-        df['HE'] = pd.to_numeric(df['HOURENDING'], errors='coerce').astype(int)
+        df['HE'] = pd.to_numeric(df['HOURENDING'], errors='coerce')
     else:
-        df['HE'] = (df['datetime'].dt.hour + 1).astype(int)
+        df['HE'] = df['datetime'].dt.hour + 1
     
     df = df.sort_values('HE')
     
@@ -388,7 +380,7 @@ def create_price_chart(da_df, rt_5min_df):
 
 def render_node(display_name, objectid, date_str, current_he, refresh_key):
     """Render a single node panel with price boxes and chart"""
-    # Fetch RT data - refresh_key forces fresh fetch on page refresh
+    # Fetch RT data
     rt_5min_df = None
     current_rt = None
     try:
@@ -396,7 +388,7 @@ def render_node(display_name, objectid, date_str, current_he, refresh_key):
     except Exception as e:
         logger.error(f"RT fetch failed for {display_name}: {e}")
     
-    # Fetch DA data - no hour_key needed, DA is fixed for the day
+    # Fetch DA data
     da_df = None
     try:
         da_df = fetch_da_hourly(objectid, date_str)
@@ -417,11 +409,9 @@ def render_node(display_name, objectid, date_str, current_he, refresh_key):
 
 
 def render_ercot_tab():
-    tz = ISO_TIMEZONES["ERCOT"]
-    now = datetime.now(tz)
-    date_str = now.strftime('%Y-%m-%d')
-    current_he = get_current_he(tz)
-    # 5-min bucket: floor minute to nearest 5
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    current_he = get_current_he()
+    now = datetime.now(CENTRAL_TZ)
     refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
     
     ercot_list = list(ERCOT_NODES.items())
@@ -439,11 +429,9 @@ def render_ercot_tab():
 
 
 def render_pjm_tab():
-    tz = ISO_TIMEZONES["PJM"]
-    now = datetime.now(tz)
-    date_str = now.strftime('%Y-%m-%d')
-    current_he = get_current_he(tz)
-    # 5-min bucket: floor minute to nearest 5
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    current_he = get_current_he()
+    now = datetime.now(CENTRAL_TZ)
     refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
     
     pjm_list = list(PJM_NODES.items())
@@ -468,11 +456,9 @@ def render_pjm_tab():
 
 
 def render_caiso_tab():
-    tz = ISO_TIMEZONES["CAISO"]
-    now = datetime.now(tz)
-    date_str = now.strftime('%Y-%m-%d')
-    current_he = get_current_he(tz)
-    # 5-min bucket: floor minute to nearest 5
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    current_he = get_current_he()
+    now = datetime.now(CENTRAL_TZ)
     refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
     
     caiso_cols = st.columns(len(CAISO_NODES))
@@ -493,6 +479,10 @@ def _get_rt_price(objectid, date_str, refresh_key):
 
 def render_all_rt_tab():
     """Render All-RT tab with 3 columns showing all assets and RT prices"""
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    now = datetime.now(CENTRAL_TZ)
+    refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
+    
     col1, col2, col3 = st.columns(3)
     
     # Custom CSS for this tab
@@ -524,12 +514,6 @@ def render_all_rt_tab():
     """, unsafe_allow_html=True)
     
     def render_iso_column(iso_name, nodes_dict):
-        tz = ISO_TIMEZONES[iso_name]
-        now = datetime.now(tz)
-        date_str = now.strftime('%Y-%m-%d')
-        # 5-min bucket: floor minute to nearest 5
-        refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
-        
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
             current_rt = _get_rt_price(objectid, date_str, refresh_key)
@@ -562,15 +546,16 @@ def main():
     st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
     
     now = datetime.now(CENTRAL_TZ)
-    current_he = get_current_he(CENTRAL_TZ)  # Header display uses Central time
+    current_he = get_current_he()
     
-    # Calculate next 5-min interval refresh time - use :55 for data availability buffer
+    # Calculate next 5-min interval refresh time - use +1:05 for data availability buffer
     current_minute = now.minute
     next_5min = ((current_minute // 5) + 1) * 5
     if next_5min >= 60:
-        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=55, microsecond=0)
+        next_5min_mark = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
     else:
-        next_5min_refresh = now.replace(minute=next_5min, second=55, microsecond=0)
+        next_5min_mark = now.replace(minute=next_5min, second=0, microsecond=0)
+    next_5min_refresh = next_5min_mark + timedelta(minutes=1, seconds=5)
     if (next_5min_refresh - now).total_seconds() < 5:
         next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
     
