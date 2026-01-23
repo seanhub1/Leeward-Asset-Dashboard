@@ -126,8 +126,8 @@ PJM_NODES = {
     "Mendota Hills": 1552844480,
     "Crescent Ridge": 1552844482,
     "Lone Tree": 2156110042,
-    "GSG SUB": 2041988725,
-    "GSG WB": 1084391168,
+    "GSG Sublette": 2041988725,
+    "GSG Westbrook": 1084391168,
 }
 
 CAISO_NODES = {
@@ -260,9 +260,9 @@ def fetch_da_hourly(objectid, date_str):
     df['DA_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
     
     if 'HOURENDING' in df.columns:
-        df['HE'] = pd.to_numeric(df['HOURENDING'], errors='coerce')
+        df['HE'] = pd.to_numeric(df['HOURENDING'], errors='coerce').astype(int)
     else:
-        df['HE'] = df['datetime'].dt.hour + 1
+        df['HE'] = (df['datetime'].dt.hour + 1).astype(int)
     
     df = df.sort_values('HE')
     
@@ -418,9 +418,11 @@ def render_node(display_name, objectid, date_str, current_he, refresh_key):
 
 def render_ercot_tab():
     tz = ISO_TIMEZONES["ERCOT"]
-    date_str = datetime.now(tz).strftime('%Y-%m-%d')
+    now = datetime.now(tz)
+    date_str = now.strftime('%Y-%m-%d')
     current_he = get_current_he(tz)
-    refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
+    # 5-min bucket: floor minute to nearest 5
+    refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
     
     ercot_list = list(ERCOT_NODES.items())
     
@@ -438,9 +440,11 @@ def render_ercot_tab():
 
 def render_pjm_tab():
     tz = ISO_TIMEZONES["PJM"]
-    date_str = datetime.now(tz).strftime('%Y-%m-%d')
+    now = datetime.now(tz)
+    date_str = now.strftime('%Y-%m-%d')
     current_he = get_current_he(tz)
-    refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
+    # 5-min bucket: floor minute to nearest 5
+    refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
     
     pjm_list = list(PJM_NODES.items())
     
@@ -465,9 +469,11 @@ def render_pjm_tab():
 
 def render_caiso_tab():
     tz = ISO_TIMEZONES["CAISO"]
-    date_str = datetime.now(tz).strftime('%Y-%m-%d')
+    now = datetime.now(tz)
+    date_str = now.strftime('%Y-%m-%d')
     current_he = get_current_he(tz)
-    refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
+    # 5-min bucket: floor minute to nearest 5
+    refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
     
     caiso_cols = st.columns(len(CAISO_NODES))
     
@@ -519,8 +525,10 @@ def render_all_rt_tab():
     
     def render_iso_column(iso_name, nodes_dict):
         tz = ISO_TIMEZONES[iso_name]
-        date_str = datetime.now(tz).strftime('%Y-%m-%d')
-        refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]
+        now = datetime.now(tz)
+        date_str = now.strftime('%Y-%m-%d')
+        # 5-min bucket: floor minute to nearest 5
+        refresh_key = now.strftime('%Y-%m-%d %H:') + str(now.minute // 5)
         
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
