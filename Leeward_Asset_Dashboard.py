@@ -12,8 +12,16 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Timezone for Central Time
-CENTRAL_TZ = ZoneInfo("America/Chicago")
+# Timezones for each ISO
+CENTRAL_TZ = ZoneInfo("America/Chicago")  # ERCOT
+EASTERN_TZ = ZoneInfo("America/New_York")  # PJM
+PACIFIC_TZ = ZoneInfo("America/Los_Angeles")  # CAISO
+
+ISO_TIMEZONES = {
+    "ERCOT": CENTRAL_TZ,
+    "PJM": EASTERN_TZ,
+    "CAISO": PACIFIC_TZ,
+}
 
 # Page configuration
 st.set_page_config(
@@ -134,9 +142,9 @@ API_RETRY_ATTEMPTS = 3
 API_RETRY_DELAY = 2  # seconds between retries
 
 
-def get_current_he():
-    """Get current Hour Ending. 4:00 PM (hour 16) = HE17, 12:00 AM (hour 0) = HE1"""
-    now = datetime.now(CENTRAL_TZ)
+def get_current_he(tz):
+    """Get current Hour Ending for given timezone. 4:00 PM (hour 16) = HE17, 12:00 AM (hour 0) = HE1"""
+    now = datetime.now(tz)
     return now.hour + 1
 
 
@@ -409,9 +417,10 @@ def render_node(display_name, objectid, date_str, current_he, refresh_key):
 
 
 def render_ercot_tab():
-    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    current_he = get_current_he()
-    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
+    tz = ISO_TIMEZONES["ERCOT"]
+    date_str = datetime.now(tz).strftime('%Y-%m-%d')
+    current_he = get_current_he(tz)
+    refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     ercot_list = list(ERCOT_NODES.items())
     
@@ -428,9 +437,10 @@ def render_ercot_tab():
 
 
 def render_pjm_tab():
-    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    current_he = get_current_he()
-    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
+    tz = ISO_TIMEZONES["PJM"]
+    date_str = datetime.now(tz).strftime('%Y-%m-%d')
+    current_he = get_current_he(tz)
+    refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     pjm_list = list(PJM_NODES.items())
     
@@ -454,9 +464,10 @@ def render_pjm_tab():
 
 
 def render_caiso_tab():
-    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    current_he = get_current_he()
-    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
+    tz = ISO_TIMEZONES["CAISO"]
+    date_str = datetime.now(tz).strftime('%Y-%m-%d')
+    current_he = get_current_he(tz)
+    refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     caiso_cols = st.columns(len(CAISO_NODES))
     
@@ -476,9 +487,6 @@ def _get_rt_price(objectid, date_str, refresh_key):
 
 def render_all_rt_tab():
     """Render All-RT tab with 3 columns showing all assets and RT prices"""
-    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
-    
     col1, col2, col3 = st.columns(3)
     
     # Custom CSS for this tab
@@ -510,6 +518,10 @@ def render_all_rt_tab():
     """, unsafe_allow_html=True)
     
     def render_iso_column(iso_name, nodes_dict):
+        tz = ISO_TIMEZONES[iso_name]
+        date_str = datetime.now(tz).strftime('%Y-%m-%d')
+        refresh_key = datetime.now(tz).strftime('%Y-%m-%d %H:%M')[:15]
+        
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
             current_rt = _get_rt_price(objectid, date_str, refresh_key)
