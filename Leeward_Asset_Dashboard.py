@@ -170,27 +170,28 @@ def parse_yes_html_table(html_text):
     return None
 
 
-def _fetch_with_retry(url: str, description: str) -> requests.Response:
+def _fetch_with_retry(url: str, description: str, retries: int = None) -> requests.Response:
     """Fetch URL with retry logic. Returns response or raises Exception after all retries fail."""
+    max_retries = retries if retries is not None else API_RETRY_ATTEMPTS
     last_error = None
     
-    for attempt in range(1, API_RETRY_ATTEMPTS + 1):
+    for attempt in range(1, max_retries + 1):
         try:
             response = requests.get(url, auth=YES_AUTH, timeout=API_TIMEOUT)
             if response.ok:
                 return response
             else:
                 last_error = f"{description} returned HTTP {response.status_code}"
-                logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+                logger.warning(f"Attempt {attempt}/{max_retries}: {last_error}")
         except requests.exceptions.Timeout:
             last_error = f"{description} timed out after {API_TIMEOUT}s"
-            logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+            logger.warning(f"Attempt {attempt}/{max_retries}: {last_error}")
         except requests.exceptions.RequestException as e:
             last_error = f"{description} request failed: {e}"
-            logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+            logger.warning(f"Attempt {attempt}/{max_retries}: {last_error}")
         
         # Wait before retry (except on last attempt)
-        if attempt < API_RETRY_ATTEMPTS:
+        if attempt < max_retries:
             time.sleep(API_RETRY_DELAY)
     
     raise Exception(last_error)
@@ -231,16 +232,17 @@ def fetch_rt_5min(objectid, date_str):
     return df[['time_hrs', 'RT_Price']].copy(), latest
 
 
-@st.cache_data(ttl=3600)  # 1 hour TTL - DA prices are hourly, refresh once per hour
-def fetch_da_hourly(objectid, date_str):
+@st.cache_data(ttl=86400)  # 24h TTL fallback - cache invalidates via hour_key parameter
+def fetch_da_hourly(objectid, date_str, hour_key):
     """Fetch hourly DA LMP from YES Energy timeseries API.
+    hour_key is used for cache invalidation - changes hourly to trigger fresh fetch.
     Returns DataFrame or raises Exception."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     
     url = f"{YES_BASE}/timeseries/DALMP/{objectid}?agglevel=HOUR&startdate={yes_date}&enddate={yes_date}"
     
-    response = _fetch_with_retry(url, f"DA API for {objectid}")
+    response = _fetch_with_retry(url, f"DA API for {objectid}", retries=5)
     
     df = parse_yes_html_table(response.text)
     if df is None or df.empty:
@@ -389,7 +391,7 @@ def render_node(display_name, objectid, date_str, current_he):
     # Fetch DA data
     da_df = None
     try:
-        da_df = fetch_da_hourly(objectid, date_str)
+        da_df = fetch_da_hourly(objectid, date_str, current_he)
     except Exception as e:
         logger.error(f"DA fetch failed for {display_name}: {e}")
     
