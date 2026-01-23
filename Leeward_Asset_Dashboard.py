@@ -368,7 +368,8 @@ def create_price_chart(da_df, rt_5min_df):
             gridcolor='#444',
             showline=True,
             linecolor='#666',
-            tickprefix='$'
+            tickprefix='$',
+            zeroline=False
         )
     )
     
