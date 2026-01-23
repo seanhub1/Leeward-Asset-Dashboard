@@ -473,12 +473,6 @@ def render_all_rt_tab():
     """Render All-RT tab with 3 columns showing all assets and RT prices"""
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     
-    # Pre-fetch all RT prices first
-    all_prices = {}
-    for nodes_dict in [ERCOT_NODES, PJM_NODES, CAISO_NODES]:
-        for display_name, objectid in nodes_dict.items():
-            all_prices[objectid] = _get_rt_price(objectid, date_str)
-    
     col1, col2, col3 = st.columns(3)
     
     # Custom CSS for this tab
@@ -512,7 +506,7 @@ def render_all_rt_tab():
     def render_iso_column(iso_name, nodes_dict):
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
-            current_rt = all_prices[objectid]
+            current_rt = _get_rt_price(objectid, date_str)
             
             if current_rt is not None:
                 price_str = f"${current_rt:.2f}"
