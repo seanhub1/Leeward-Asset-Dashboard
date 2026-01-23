@@ -106,9 +106,9 @@ YES_BASE = 'https://services.yesenergy.com/PS/rest'
 # All nodes with YES Energy object IDs
 ERCOT_NODES = {
     "Horizon Solar": 10017137187,
+    "Morrow Solar": 10017467500,
     "Sweetwater": 10000698821,
     "Barilla Solar": 10004063217,
-    "Morrow Solar": 10017467500,
 }
 
 PJM_NODES = {
@@ -410,11 +410,18 @@ def render_ercot_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
     
-    ercot_cols = st.columns(len(ERCOT_NODES))
+    ercot_list = list(ERCOT_NODES.items())
     
-    for i, (display_name, objectid) in enumerate(ERCOT_NODES.items()):
-        with ercot_cols[i]:
+    ercot_row1 = st.columns(3)
+    for i in range(3):
+        with ercot_row1[i]:
+            display_name, objectid = ercot_list[i]
             render_node(display_name, objectid, date_str, current_he)
+    
+    ercot_row2 = st.columns(3)
+    with ercot_row2[0]:
+        display_name, objectid = ercot_list[3]
+        render_node(display_name, objectid, date_str, current_he)
 
 
 def render_pjm_tab():
@@ -423,15 +430,21 @@ def render_pjm_tab():
     
     pjm_list = list(PJM_NODES.items())
     
-    pjm_row1 = st.columns(4)
-    for i in range(4):
+    pjm_row1 = st.columns(3)
+    for i in range(3):
         with pjm_row1[i]:
             display_name, objectid = pjm_list[i]
             render_node(display_name, objectid, date_str, current_he)
     
-    pjm_row2 = st.columns(4)
-    for i in range(4, 8):
-        with pjm_row2[i-4]:
+    pjm_row2 = st.columns(3)
+    for i in range(3, 6):
+        with pjm_row2[i-3]:
+            display_name, objectid = pjm_list[i]
+            render_node(display_name, objectid, date_str, current_he)
+    
+    pjm_row3 = st.columns(3)
+    for i in range(6, 8):
+        with pjm_row3[i-6]:
             display_name, objectid = pjm_list[i]
             render_node(display_name, objectid, date_str, current_he)
 
