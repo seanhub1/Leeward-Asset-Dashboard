@@ -201,9 +201,10 @@ def _fetch_with_retry(url: str, description: str, retries: int = None) -> reques
 # YES Energy API Functions
 # ============================================================================
 
-@st.cache_data(ttl=60)  # 60s TTL - expires before 5-min refresh cycle, ensures fresh RT data
-def fetch_rt_5min(objectid, date_str):
+@st.cache_data(ttl=120)  # 2min TTL - reduces API load during tab switching
+def fetch_rt_5min(objectid, date_str, refresh_key):
     """Fetch 5-min RT LMP from YES Energy timeseries API.
+    refresh_key forces cache invalidation on page refresh.
     Returns (DataFrame, latest_price) tuple or raises Exception."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
@@ -232,10 +233,9 @@ def fetch_rt_5min(objectid, date_str):
     return df[['time_hrs', 'RT_Price']].copy(), latest
 
 
-@st.cache_data(ttl=86400)  # 24h TTL fallback - cache invalidates via hour_key parameter
-def fetch_da_hourly(objectid, date_str, hour_key):
+@st.cache_data(ttl=86400)  # 24h TTL - DA prices don't change during the day
+def fetch_da_hourly(objectid, date_str):
     """Fetch hourly DA LMP from YES Energy timeseries API.
-    hour_key is used for cache invalidation - changes hourly to trigger fresh fetch.
     Returns DataFrame or raises Exception."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
@@ -378,20 +378,20 @@ def create_price_chart(da_df, rt_5min_df):
     return fig
 
 
-def render_node(display_name, objectid, date_str, current_he):
+def render_node(display_name, objectid, date_str, current_he, refresh_key):
     """Render a single node panel with price boxes and chart"""
-    # Fetch RT data
+    # Fetch RT data - refresh_key forces fresh fetch on page refresh
     rt_5min_df = None
     current_rt = None
     try:
-        rt_5min_df, current_rt = fetch_rt_5min(objectid, date_str)
+        rt_5min_df, current_rt = fetch_rt_5min(objectid, date_str, refresh_key)
     except Exception as e:
         logger.error(f"RT fetch failed for {display_name}: {e}")
     
-    # Fetch DA data
+    # Fetch DA data - no hour_key needed, DA is fixed for the day
     da_df = None
     try:
-        da_df = fetch_da_hourly(objectid, date_str, current_he)
+        da_df = fetch_da_hourly(objectid, date_str)
     except Exception as e:
         logger.error(f"DA fetch failed for {display_name}: {e}")
     
@@ -411,6 +411,7 @@ def render_node(display_name, objectid, date_str, current_he):
 def render_ercot_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
+    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     ercot_list = list(ERCOT_NODES.items())
     
@@ -418,17 +419,18 @@ def render_ercot_tab():
     for i in range(3):
         with ercot_row1[i]:
             display_name, objectid = ercot_list[i]
-            render_node(display_name, objectid, date_str, current_he)
+            render_node(display_name, objectid, date_str, current_he, refresh_key)
     
     ercot_row2 = st.columns(3)
     with ercot_row2[0]:
         display_name, objectid = ercot_list[3]
-        render_node(display_name, objectid, date_str, current_he)
+        render_node(display_name, objectid, date_str, current_he, refresh_key)
 
 
 def render_pjm_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
+    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     pjm_list = list(PJM_NODES.items())
     
@@ -436,36 +438,37 @@ def render_pjm_tab():
     for i in range(3):
         with pjm_row1[i]:
             display_name, objectid = pjm_list[i]
-            render_node(display_name, objectid, date_str, current_he)
+            render_node(display_name, objectid, date_str, current_he, refresh_key)
     
     pjm_row2 = st.columns(3)
     for i in range(3, 6):
         with pjm_row2[i-3]:
             display_name, objectid = pjm_list[i]
-            render_node(display_name, objectid, date_str, current_he)
+            render_node(display_name, objectid, date_str, current_he, refresh_key)
     
     pjm_row3 = st.columns(3)
     for i in range(6, 8):
         with pjm_row3[i-6]:
             display_name, objectid = pjm_list[i]
-            render_node(display_name, objectid, date_str, current_he)
+            render_node(display_name, objectid, date_str, current_he, refresh_key)
 
 
 def render_caiso_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
+    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     caiso_cols = st.columns(len(CAISO_NODES))
     
     for i, (display_name, objectid) in enumerate(CAISO_NODES.items()):
         with caiso_cols[i]:
-            render_node(display_name, objectid, date_str, current_he)
+            render_node(display_name, objectid, date_str, current_he, refresh_key)
 
 
-def _get_rt_price(objectid, date_str):
+def _get_rt_price(objectid, date_str, refresh_key):
     """Helper to fetch RT price only."""
     try:
-        _, current_rt = fetch_rt_5min(objectid, date_str)
+        _, current_rt = fetch_rt_5min(objectid, date_str, refresh_key)
         return current_rt
     except Exception:
         return None
@@ -474,6 +477,7 @@ def _get_rt_price(objectid, date_str):
 def render_all_rt_tab():
     """Render All-RT tab with 3 columns showing all assets and RT prices"""
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    refresh_key = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d %H:%M')[:15]  # Changes every 5 min
     
     col1, col2, col3 = st.columns(3)
     
@@ -508,7 +512,7 @@ def render_all_rt_tab():
     def render_iso_column(iso_name, nodes_dict):
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
-            current_rt = _get_rt_price(objectid, date_str)
+            current_rt = _get_rt_price(objectid, date_str, refresh_key)
             
             if current_rt is not None:
                 price_str = f"${current_rt:.2f}"
@@ -540,13 +544,13 @@ def main():
     now = datetime.now(CENTRAL_TZ)
     current_he = get_current_he()
     
-    # Calculate next 5-min interval refresh time
+    # Calculate next 5-min interval refresh time - use :45 for data availability buffer
     current_minute = now.minute
     next_5min = ((current_minute // 5) + 1) * 5
     if next_5min >= 60:
-        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=35, microsecond=0)
+        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=45, microsecond=0)
     else:
-        next_5min_refresh = now.replace(minute=next_5min, second=35, microsecond=0)
+        next_5min_refresh = now.replace(minute=next_5min, second=45, microsecond=0)
     if (next_5min_refresh - now).total_seconds() < 5:
         next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
     
