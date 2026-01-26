@@ -17,7 +17,7 @@ CENTRAL_TZ = ZoneInfo("America/Chicago")
 
 # Page configuration
 st.set_page_config(
-    page_title="Leeward Asset Dashboard",
+    page_title="LRE Asset Dashboard",
     layout="wide"
 )
 
@@ -543,7 +543,7 @@ def render_all_rt_tab():
 
 
 def main():
-    st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">LRE Asset Dashboard</div>', unsafe_allow_html=True)
     
     now = datetime.now(CENTRAL_TZ)
     current_he = get_current_he()
