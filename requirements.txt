@@ -6,3 +6,4 @@ gridstatus
 pytz
 tzdata
 beautifulsoup4
+gridstatusio
