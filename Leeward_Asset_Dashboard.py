@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import re
 import time
 import logging
+import gridstatus
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -110,6 +111,27 @@ def _pjm_headers():
 
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
+
+GS_ERCOT = gridstatus.Ercot()
+
+
+def fetch_ercot_rt_latest_gs():
+    """Fetch latest SCED LMPs via gridstatus (MIS CSV) — ~2 min lag.
+    Returns dict of {settlement_point: (lmp, timestamp)}."""
+    try:
+        df = GS_ERCOT.get_lmp("latest", verbose=False)
+        if df is None or df.empty:
+            return {}
+        ts_col = "Interval Start" if "Interval Start" in df.columns else "SCED Timestamp"
+        out = {}
+        for _, row in df.iterrows():
+            loc = row.get("Location")
+            if loc:
+                out[loc] = (row["LMP"], row[ts_col])
+        return out
+    except Exception as e:
+        logger.error(f"gridstatus latest SCED failed: {e}")
+        return {}
 
 
 def get_current_he():
@@ -403,10 +425,15 @@ def create_price_chart(da_df, rt_5min_df):
     return fig
 
 
-def render_ercot_node(display_name, settlement_point, date_str, current_he):
+def render_ercot_node(display_name, settlement_point, date_str, current_he, gs_latest=None):
     rt_df, current_rt = None, None
+    # Use gridstatus latest price if available (~2 min lag vs ~17 min API)
+    if gs_latest and settlement_point in gs_latest:
+        current_rt = gs_latest[settlement_point][0]
     try:
-        rt_df, current_rt = fetch_ercot_rt(settlement_point, date_str)
+        rt_df, api_rt = fetch_ercot_rt(settlement_point, date_str)
+        if current_rt is None:
+            current_rt = api_rt
     except Exception as e:
         logger.error(f"ERCOT RT failed for {display_name}: {e}")
     da_df = None
@@ -469,10 +496,11 @@ def render_caiso_node(display_name, objectid, date_str, current_he):
 def render_ercot_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
+    gs_latest = fetch_ercot_rt_latest_gs()
     cols = st.columns(len(ERCOT_NODES))
     for i, (name, sp) in enumerate(ERCOT_NODES.items()):
         with cols[i]:
-            render_ercot_node(name, sp, date_str, current_he)
+            render_ercot_node(name, sp, date_str, current_he, gs_latest)
 
 
 def render_pjm_tab():
@@ -501,7 +529,9 @@ def render_caiso_tab():
             render_caiso_node(name, oid, date_str, current_he)
 
 
-def _get_rt_price_ercot(sp, date_str):
+def _get_rt_price_ercot(sp, date_str, gs_latest=None):
+    if gs_latest and sp in gs_latest:
+        return gs_latest[sp][0]
     try:
         _, price = fetch_ercot_rt(sp, date_str)
         return price
@@ -528,6 +558,7 @@ def _get_rt_price_caiso(oid, date_str):
 def render_all_rt_tab():
     ercot_date = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     pjm_date = datetime.now(EASTERN_TZ).strftime('%Y-%m-%d')
+    gs_latest = fetch_ercot_rt_latest_gs()
 
     st.markdown("""
     <style>
@@ -545,7 +576,7 @@ def render_all_rt_tab():
     with col1:
         st.markdown('<div class="rt-header">ERCOT</div>', unsafe_allow_html=True)
         for name, sp in ERCOT_NODES.items():
-            price = _get_rt_price_ercot(sp, ercot_date)
+            price = _get_rt_price_ercot(sp, ercot_date, gs_latest)
             price_str = f"${price:.2f}" if price is not None else "N/A"
             color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
             st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
