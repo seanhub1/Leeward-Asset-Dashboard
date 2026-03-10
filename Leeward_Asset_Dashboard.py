@@ -18,7 +18,7 @@ CENTRAL_TZ = ZoneInfo("America/Chicago")
 EASTERN_TZ = ZoneInfo("America/New_York")
 PACIFIC_TZ = ZoneInfo("US/Pacific")
 
-st.set_page_config(page_title="Leeward Asset Dashboard", layout="wide")
+st.set_page_config(page_title="LRE Dashboard", layout="wide")
 
 st.markdown("""
 <style>
@@ -531,7 +531,7 @@ def render_caiso_tab():
             render_caiso_node(name, info, date_str, current_he)
 
 def main():
-    st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">LRE Asset Dashboard</div>', unsafe_allow_html=True)
 
     now = datetime.now(CENTRAL_TZ)
     current_he = get_current_he()
