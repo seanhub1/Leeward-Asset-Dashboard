@@ -8,20 +8,20 @@ import re
 import time
 import logging
 
-# Configure logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Timezone for Central Time
+
 CENTRAL_TZ = ZoneInfo("America/Chicago")
 
-# Page configuration
+
 st.set_page_config(
     page_title="Leeward Asset Dashboard",
     layout="wide"
 )
 
-# Styling - Force dark mode and wide layout
+
 st.markdown("""
 <style>
     /* Force dark mode */
@@ -99,11 +99,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# YES Energy credentials from Streamlit secrets
+
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
 
-# All nodes with YES Energy object IDs
+
 ERCOT_NODES = {
     "Horizon Solar": 10017137187,
     "Sweetwater": 10000698821,
@@ -131,18 +131,23 @@ CAISO_NODES = {
 # API Configuration
 API_TIMEOUT = 30
 API_RETRY_ATTEMPTS = 3
-API_RETRY_DELAY = 2  # seconds between retries
+API_RETRY_DELAY = 2 
+API_CALL_SPACING = 0.15  
+_last_api_call_time = 0.0  
+
+
+_yes_session = requests.Session()
+_yes_session.auth = None  # auth set per-call after secrets load
 
 
 def get_current_he():
-    """Get current Hour Ending. 4:00 PM (hour 16) = HE17, 12:00 AM (hour 0) = HE1"""
+    
     now = datetime.now(CENTRAL_TZ)
     return now.hour + 1
 
 
 def parse_yes_html_table(html_text):
-    """Parse YES Energy HTML table response into DataFrame.
-    Returns None if parsing fails."""
+
     if not html_text or not isinstance(html_text, str):
         return None
     
@@ -171,14 +176,29 @@ def parse_yes_html_table(html_text):
 
 
 def _fetch_with_retry(url: str, description: str) -> requests.Response:
-    """Fetch URL with retry logic. Returns response or raises Exception after all retries fail."""
+    
+    global _last_api_call_time
     last_error = None
     
     for attempt in range(1, API_RETRY_ATTEMPTS + 1):
         try:
-            response = requests.get(url, auth=YES_AUTH, timeout=API_TIMEOUT)
+            # Self-throttle: enforce minimum spacing between API calls
+            elapsed = time.time() - _last_api_call_time
+            if elapsed < API_CALL_SPACING:
+                time.sleep(API_CALL_SPACING - elapsed)
+            
+            _last_api_call_time = time.time()
+            response = _yes_session.get(url, auth=YES_AUTH, timeout=API_TIMEOUT)
+            
             if response.ok:
                 return response
+            elif response.status_code == 429:
+                # Rate limited - back off more aggressively
+                retry_after = int(response.headers.get('Retry-After', API_RETRY_DELAY * attempt * 2))
+                last_error = f"{description} rate limited (429), backing off {retry_after}s"
+                logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
+                time.sleep(retry_after)
+                continue
             else:
                 last_error = f"{description} returned HTTP {response.status_code}"
                 logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
@@ -189,21 +209,18 @@ def _fetch_with_retry(url: str, description: str) -> requests.Response:
             last_error = f"{description} request failed: {e}"
             logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
         
-        # Wait before retry (except on last attempt)
+
         if attempt < API_RETRY_ATTEMPTS:
-            time.sleep(API_RETRY_DELAY)
+            time.sleep(API_RETRY_DELAY * attempt)
     
     raise Exception(last_error)
 
 
-# ============================================================================
-# YES Energy API Functions
-# ============================================================================
+
 
 @st.cache_data(ttl=60)  # 60s TTL - expires before 5-min refresh cycle, ensures fresh RT data
 def fetch_rt_5min(objectid, date_str):
-    """Fetch 5-min RT LMP from YES Energy timeseries API.
-    Returns (DataFrame, latest_price) tuple or raises Exception."""
+
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     
@@ -220,7 +237,7 @@ def fetch_rt_5min(objectid, date_str):
     df['time_hrs'] = df['datetime'].dt.hour + df['datetime'].dt.minute / 60.0
     df = df.sort_values('datetime')
     
-    # Get the latest non-NaN price
+
     valid_prices = df.dropna(subset=['RT_Price'])
     if valid_prices.empty:
         raise Exception(f"No valid RT prices found for {objectid}")
@@ -231,10 +248,9 @@ def fetch_rt_5min(objectid, date_str):
     return df[['time_hrs', 'RT_Price']].copy(), latest
 
 
-@st.cache_data(ttl=3600)  # 1 hour TTL - DA prices are hourly, refresh once per hour
+@st.cache_data(ttl=86400)  # 24h TTL - DA prices are static for the day, fetch once
 def fetch_da_hourly(objectid, date_str):
-    """Fetch hourly DA LMP from YES Energy timeseries API.
-    Returns DataFrame or raises Exception."""
+
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     
@@ -260,9 +276,7 @@ def fetch_da_hourly(objectid, date_str):
     return df[['HE', 'DA_Price']].copy()
 
 
-# ============================================================================
-# Display Functions
-# ============================================================================
+
 
 def render_price_boxes(display_name, da_price, rt_price):
     da_color = "price-red"
@@ -298,7 +312,7 @@ def render_price_boxes(display_name, da_price, rt_price):
 
 
 def create_price_chart(da_df, rt_5min_df):
-    """Create chart with hourly DA (step) and 5-min RT"""
+
     fig = go.Figure()
     
     # RT line (white) - 5-min data
@@ -314,7 +328,7 @@ def create_price_chart(da_df, rt_5min_df):
             )
         )
     
-    # DA hourly step line (red)
+
     if da_df is not None and not da_df.empty:
         da_x = []
         da_y = []
@@ -376,8 +390,8 @@ def create_price_chart(da_df, rt_5min_df):
 
 
 def render_node(display_name, objectid, date_str, current_he):
-    """Render a single node panel with price boxes and chart"""
-    # Fetch RT data
+
+
     rt_5min_df = None
     current_rt = None
     try:
@@ -385,14 +399,14 @@ def render_node(display_name, objectid, date_str, current_he):
     except Exception as e:
         logger.error(f"RT fetch failed for {display_name}: {e}")
     
-    # Fetch DA data
+
     da_df = None
     try:
         da_df = fetch_da_hourly(objectid, date_str)
     except Exception as e:
         logger.error(f"DA fetch failed for {display_name}: {e}")
     
-    # Get current DA price for display (match current HE)
+
     current_da = None
     if da_df is not None and not da_df.empty:
         da_row = da_df[da_df['HE'] == current_he]
@@ -447,7 +461,7 @@ def render_caiso_tab():
 
 
 def _get_rt_price(objectid, date_str):
-    """Helper to fetch RT price only."""
+
     try:
         _, current_rt = fetch_rt_5min(objectid, date_str)
         return current_rt
@@ -456,12 +470,12 @@ def _get_rt_price(objectid, date_str):
 
 
 def render_all_rt_tab():
-    """Render All-RT tab with 3 columns showing all assets and RT prices"""
+
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     
     col1, col2, col3 = st.columns(3)
     
-    # Custom CSS for this tab
+
     st.markdown("""
     <style>
         .rt-header {
@@ -536,7 +550,7 @@ def main():
     
     seconds_until_refresh = int((next_5min_refresh - now).total_seconds())
     
-    # Inject HTML meta refresh tag
+    
     st.markdown(f'<meta http-equiv="refresh" content="{seconds_until_refresh}">', unsafe_allow_html=True)
     
     col1, col2 = st.columns([6, 1])
