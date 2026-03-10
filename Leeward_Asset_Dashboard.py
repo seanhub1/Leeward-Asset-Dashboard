@@ -22,31 +22,31 @@ st.markdown("""
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], 
     [data-testid="stToolbar"], [data-testid="stDecoration"], 
     [data-testid="stStatusWidget"], .main, section[data-testid="stSidebar"] {
-        background-color:
-        color:
+        background-color: #1a1a1a !important;
+        color: #ffffff !important;
     }
     .main .block-container { padding-top: 1rem; max-width: 100%; }
-    .stTabs [data-baseweb="tab-list"] { gap: 20px; background-color:
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; background-color: #1a1a1a; }
     .stTabs [data-baseweb="tab"] {
         font-size: 20px; font-weight: bold; padding: 15px 30px;
-        color:
+        color: #ffffff !important; background-color: #1a1a1a !important;
     }
-    .stTabs [aria-selected="true"] { background-color:
+    .stTabs [aria-selected="true"] { background-color: #333 !important; }
     .stButton > button {
-        background-color:
-        border: 1px solid
+        background-color: #333 !important; color: #ffffff !important;
+        border: 1px solid #555 !important;
     }
-    .main-title { font-size: 48px; font-weight: bold; color:
+    .main-title { font-size: 48px; font-weight: bold; color: #ffffff; margin-bottom: 5px; }
     .price-box {
-        background-color:
+        background-color: #0d0d0d; border: 1px solid #333;
         padding: 15px 20px; text-align: center; margin-bottom: 5px;
     }
-    .node-label { font-size: 18px; color:
-    .data-type { font-size: 14px; color:
+    .node-label { font-size: 18px; color: #ffffff; font-weight: bold; margin-bottom: 5px; }
+    .data-type { font-size: 14px; color: #888; margin-bottom: 8px; }
     .price-value { font-size: 48px; font-weight: bold; margin: 10px 0; }
-    .price-green { color:
-    .price-red { color:
-    .refresh-text { font-size: 18px; color:
+    .price-green { color: #00ff00; }
+    .price-red { color: #ff4444; }
+    .refresh-text { font-size: 18px; color: #888; margin-bottom: 20px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -531,11 +531,11 @@ def render_all_rt_tab():
 
     st.markdown("""
     <style>
-        .rt-header { font-size: 24px; font-weight: bold; color:
-                     margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid
+        .rt-header { font-size: 24px; font-weight: bold; color: #ffffff;
+                     margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444; }
         .rt-row { display: flex; justify-content: space-between; padding: 8px 0;
-                  border-bottom: 1px solid
-        .rt-asset { font-size: 18px; color:
+                  border-bottom: 1px solid #333; }
+        .rt-asset { font-size: 18px; color: #ffffff; }
         .rt-price { font-size: 18px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
