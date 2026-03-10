@@ -8,15 +8,13 @@ import plotly.graph_objects as go
 import re
 import time
 import logging
-from gridstatusio.gs_client import GridStatusClient
+import gridstatus
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logging.getLogger("gridstatusio").setLevel(logging.WARNING)
 
 CENTRAL_TZ = ZoneInfo("America/Chicago")
 EASTERN_TZ = ZoneInfo("America/New_York")
-PACIFIC_TZ = ZoneInfo("US/Pacific")
 
 st.set_page_config(page_title="LRE Asset Dashboard", layout="wide")
 
@@ -53,6 +51,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 ERCOT_NODES = {
     "Horizon Solar":  "HRZN_SLR_UN1",
     "Sweetwater":     "SWEETWN3_3",
@@ -61,59 +60,26 @@ ERCOT_NODES = {
 }
 
 PJM_NODES = {
-    "Big Plain Solar":  {"pnode_name": "DEERCR  34.5 KV BIGPL2SP",  "gs_id": 2156113380},
-    "Oak Trail Solar":  {"pnode_name": "PUDDNRID34.5 KV OAKTRASP",  "gs_id": 2156113029},
-    "Allegheny Ridge":  {"pnode_name": "BEARROCK34.5 KV ARIDGWF1",  "gs_id": 71856697},
-    "Mendota Hills":    {"pnode_name": "979 MEND34.5 KV MENDOTWF",  "gs_id": 1552844480},
-    "Crescent Ridge":   {"pnode_name": "981 CRES34.5 KV LONETRWF",  "gs_id": 2156110042},
-    "Lone Tree":        {"pnode_name": "981 CRES34.5 KV LONETRWF",  "gs_id": 2156110042},
-    "GSG Sublette":     {"pnode_name": "107 DIXO34.5 KV SUBLETTE",  "gs_id": 2041988725},
-    "GSG Westbrook":    {"pnode_name": "139 MEND34.5 KV WBROOKWF",  "gs_id": 1084391168},
+    "Big Plain Solar":  "DEERCR  34.5 KV BIGPL2SP",
+    "Oak Trail Solar":  "PUDDNRID34.5 KV OAKTRASP",
+    "Allegheny Ridge":  "BEARROCK34.5 KV ARIDGWF1",
+    "Mendota Hills":    "979 MEND34.5 KV MENDOTWF",
+    "Crescent Ridge":   "981 CRES34.5 KV LONETRWF",
+    "Lone Tree":        "981 CRES34.5 KV LONETRWF",
+    "GSG Sublette":     "107 DIXO34.5 KV SUBLETTE",
+    "GSG Westbrook":    "139 MEND34.5 KV WBROOKWF",
 }
 
 CAISO_NODES = {
-    "White Wing Ranch":    {"yes_id": 10017280372, "gs_loc": "WHITEW_7_N001"},
-    "Sierra Pinta Battery": {"yes_id": 10018494391, "gs_loc": "SRAPTA_7_ND001"},
-    "Kumeyaay Wind":       {"yes_id": 20000004301, "gs_loc": "KUMEYAAY_7_N001"},
+    "White Wing Ranch":    10017280372,
+    "Sierra Pinta Battery": 10018494391,
+    "Kumeyaay Wind":       20000004301,
 }
 
 API_TIMEOUT = 30
 API_RETRY_ATTEMPTS = 3
 API_RETRY_DELAY = 2
-GS_API_KEY = st.secrets["gridstatus"]["api_key"]
 
-@st.cache_resource
-def get_gs_client():
-    return GridStatusClient(api_key=GS_API_KEY)
-
-def _gs_fetch_rt(dataset, filter_col, filter_val, tz, limit=10):
-    client = get_gs_client()
-    now = datetime.now(tz)
-    start = (now - timedelta(minutes=20)).strftime('%Y-%m-%dT%H:%M')
-    end = (now + timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M')
-    try:
-        df = client.get_dataset(
-            dataset=dataset,
-            start=start, end=end,
-            filter_column=filter_col,
-            filter_value=str(filter_val),
-            limit=limit,
-            timezone="market",
-        )
-        if df is not None and not df.empty:
-            return float(df['lmp'].iloc[-1]), str(df['interval_start_local'].iloc[-1])
-    except Exception as e:
-        logger.error(f"gridstatusio RT failed for {filter_val}: {e}")
-    return None, None
-def gs_get_pjm_rt_price(gs_id):
-    price, _ = _gs_fetch_rt("pjm_lmp_real_time_5_min", "location_id", gs_id, EASTERN_TZ)
-    return price
-def gs_get_caiso_rt_price(gs_loc):
-    price, _ = _gs_fetch_rt("caiso_lmp_real_time_5_min", "location", gs_loc, PACIFIC_TZ)
-    return price
-def gs_get_ercot_rt_price(sp):
-    price, _ = _gs_fetch_rt("ercot_lmp_by_settlement_point", "location", sp, CENTRAL_TZ)
-    return price
 
 def _ercot_auth():
     uid = st.secrets["ercot"]["username"]
@@ -137,9 +103,44 @@ def _ercot_auth():
     except Exception:
         pass
     return None
+
+
+def _pjm_headers():
+    return {"Ocp-Apim-Subscription-Key": st.secrets["pjm"]["subscription_key"]}
+
+
+YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
+YES_BASE = 'https://services.yesenergy.com/PS/rest'
+
+GS_ERCOT = gridstatus.Ercot()
+
+
+def fetch_ercot_rt_latest_gs():
+    """Fetch latest SCED LMPs via gridstatus (MIS CSV) — ~2 min lag.
+    Returns dict of {settlement_point: (lmp, timestamp)}."""
+    try:
+        df = GS_ERCOT.get_lmp("latest", verbose=False)
+        if df is None or df.empty:
+            return {}
+        ts_col = "Interval Start" if "Interval Start" in df.columns else "SCED Timestamp"
+        out = {}
+        for _, row in df.iterrows():
+            loc = row.get("Location")
+            if loc:
+                out[loc] = (row["LMP"], row[ts_col])
+        return out
+    except Exception as e:
+        logger.error(f"gridstatus latest SCED failed: {e}")
+        return {}
+
+
 def get_current_he():
-    return datetime.now(CENTRAL_TZ).hour + 1
+    now = datetime.now(CENTRAL_TZ)
+    return now.hour + 1
+
+
 def fetch_ercot_rt(settlement_point, date_str):
+    """Fetch 5-min SCED LMPs from np6-788-cd, return (df[time_hrs, RT_Price], latest_price)."""
     auths = _ercot_auth()
     if not auths:
         raise Exception("ERCOT auth failed")
@@ -165,8 +166,11 @@ def fetch_ercot_rt(settlement_point, date_str):
     df = df.sort_values('_ts')
     latest = df['RT_Price'].iloc[-1]
     return df[['time_hrs', 'RT_Price']].copy(), latest
-@st.cache_data(ttl=86400)
+
+
+@st.cache_data(ttl=3600)
 def fetch_ercot_da(settlement_point, date_str):
+    """Fetch DAM SPP from np4-190-cd, return df[HE, DA_Price]."""
     auths = _ercot_auth()
     if not auths:
         raise Exception("ERCOT auth failed")
@@ -194,30 +198,10 @@ def fetch_ercot_da(settlement_point, date_str):
     df = df.sort_values('HE')
     return df[['HE', 'DA_Price']].copy()
 
-def _pjm_headers():
-    return {"Ocp-Apim-Subscription-Key": st.secrets["pjm"]["subscription_key"]}
-@st.cache_data(ttl=86400)
-def _get_pjm_pnode_id(pnode_name):
-    hdrs = _pjm_headers()
-    url = (
-        f"https://api.pjm.com/api/v1/pnode"
-        f"?pnode_name={quote(pnode_name)}"
-        f"&rowCount=10&startRow=1&download=true"
-        f"&fields=pnode_id,pnode_name"
-    )
-    try:
-        resp = requests.get(url, headers=hdrs, timeout=API_TIMEOUT)
-        if resp.ok:
-            data = resp.json()
-            if data:
-                for item in data:
-                    if item.get('pnode_name', '').upper() == pnode_name.upper():
-                        return item.get('pnode_id')
-                return data[0].get('pnode_id')
-    except Exception:
-        pass
-    return None
+
 def fetch_pjm_rt(pnode_name, date_str):
+    """Fetch unverified 5-min RT LMP from PJM, return (df[time_hrs, RT_Price], latest_price).
+    Uses rt_unverified_fivemin_lmps with pnode_id for 5-min granularity."""
     pnode_id = _get_pjm_pnode_id(pnode_name)
     if not pnode_id:
         raise Exception(f"Could not find pnode_id for {pnode_name}")
@@ -246,8 +230,36 @@ def fetch_pjm_rt(pnode_name, date_str):
     df = df.dropna(subset=['RT_Price']).sort_values('datetime')
     latest = df['RT_Price'].iloc[-1]
     return df[['time_hrs', 'RT_Price']].copy(), latest
+
+
 @st.cache_data(ttl=86400)
+def _get_pjm_pnode_id(pnode_name):
+    """Look up pnode_id from pnode_name via PJM pnode API. Cached for the day."""
+    hdrs = _pjm_headers()
+    url = (
+        f"https://api.pjm.com/api/v1/pnode"
+        f"?pnode_name={quote(pnode_name)}"
+        f"&rowCount=10&startRow=1&download=true"
+        f"&fields=pnode_id,pnode_name"
+    )
+    try:
+        resp = requests.get(url, headers=hdrs, timeout=API_TIMEOUT)
+        if resp.ok:
+            data = resp.json()
+            if data:
+                for item in data:
+                    if item.get('pnode_name', '').upper() == pnode_name.upper():
+                        return item.get('pnode_id')
+                return data[0].get('pnode_id')
+    except Exception:
+        pass
+    return None
+
+
+@st.cache_data(ttl=3600)
 def fetch_pjm_da(pnode_name, date_str):
+    """Fetch DA hourly LMP from PJM, return df[HE, DA_Price].
+    Looks up pnode_id first (cached), then queries da_hrl_lmps by pnode_id."""
     pnode_id = _get_pjm_pnode_id(pnode_name)
     if not pnode_id:
         raise Exception(f"Could not find pnode_id for {pnode_name}")
@@ -265,7 +277,7 @@ def fetch_pjm_da(pnode_name, date_str):
         raise Exception(f"PJM DA HTTP {resp.status_code}")
     data = resp.json()
     if not data:
-        raise Exception(f"No PJM DA data for {pnode_name}")
+        raise Exception(f"No PJM DA data for {pnode_name} (pnode_id={pnode_id})")
     df = pd.json_normalize(data)
     if 'total_lmp_da' not in df.columns:
         raise Exception(f"No total_lmp_da in PJM response")
@@ -275,8 +287,7 @@ def fetch_pjm_da(pnode_name, date_str):
     df = df.dropna(subset=['DA_Price']).sort_values('HE')
     return df[['HE', 'DA_Price']].copy()
 
-YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
-YES_BASE = 'https://services.yesenergy.com/PS/rest'
+
 def parse_yes_html_table(html_text):
     if not html_text or not isinstance(html_text, str):
         return None
@@ -297,6 +308,8 @@ def parse_yes_html_table(html_text):
     if headers and data:
         return pd.DataFrame(data, columns=headers)
     return None
+
+
 def _fetch_yes_with_retry(url, description):
     last_error = None
     for attempt in range(1, API_RETRY_ATTEMPTS + 1):
@@ -310,7 +323,10 @@ def _fetch_yes_with_retry(url, description):
         if attempt < API_RETRY_ATTEMPTS:
             time.sleep(API_RETRY_DELAY)
     raise Exception(last_error)
+
+
 def fetch_caiso_rt(objectid, date_str):
+    """Fetch 5-min RT LMP from YES Energy for CAISO."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     url = f"{YES_BASE}/timeseries/RTLMP/{objectid}?agglevel=5MIN&startdate={yes_date}&enddate={yes_date}"
@@ -327,8 +343,11 @@ def fetch_caiso_rt(objectid, date_str):
         raise Exception(f"No valid CAISO RT prices for {objectid}")
     latest = valid['RT_Price'].iloc[-1]
     return df[['time_hrs', 'RT_Price']].copy(), latest
-@st.cache_data(ttl=86400)
+
+
+@st.cache_data(ttl=3600)
 def fetch_caiso_da(objectid, date_str):
+    """Fetch hourly DA LMP from YES Energy for CAISO."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     url = f"{YES_BASE}/timeseries/DALMP/{objectid}?agglevel=HOUR&startdate={yes_date}&enddate={yes_date}"
@@ -345,11 +364,18 @@ def fetch_caiso_da(objectid, date_str):
     df = df.sort_values('HE')
     return df[['HE', 'DA_Price']].copy()
 
+
 def render_price_boxes(display_name, da_price, rt_price):
-    da_color = "price-green" if da_price is not None and da_price >= 0 else "price-red"
+    da_color = "price-red"
     da_str = f"${da_price:.2f}" if da_price is not None else "N/A"
-    rt_color = "price-green" if rt_price is not None and rt_price >= 0 else "price-red"
+    if da_price is not None and da_price >= 0:
+        da_color = "price-green"
+
+    rt_color = "price-red"
     rt_str = f"${rt_price:.2f}" if rt_price is not None else "N/A"
+    if rt_price is not None and rt_price >= 0:
+        rt_color = "price-green"
+
     st.markdown(f"""
     <div class="price-box">
         <div class="node-label">{display_name}</div>
@@ -361,6 +387,8 @@ def render_price_boxes(display_name, da_price, rt_price):
         <div class="price-value {rt_color}">{rt_str}</div>
     </div>
     """, unsafe_allow_html=True)
+
+
 def create_price_chart(da_df, rt_5min_df):
     fig = go.Figure()
     if rt_5min_df is not None and not rt_5min_df.empty:
@@ -396,54 +424,16 @@ def create_price_chart(da_df, rt_5min_df):
     )
     return fig
 
-def render_all_rt_tab():
-    st.markdown("""
-    <style>
-        .rt-header { font-size: 24px; font-weight: bold; color: #ffffff;
-                     margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444; }
-        .rt-row { display: flex; justify-content: space-between; padding: 8px 0;
-                  border-bottom: 1px solid #333; }
-        .rt-asset { font-size: 18px; color: #ffffff; }
-        .rt-price { font-size: 18px; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown('<div class="rt-header">ERCOT</div>', unsafe_allow_html=True)
-        for name, sp in ERCOT_NODES.items():
-            price = gs_get_ercot_rt_price(sp)
-            price_str = f"${price:.2f}" if price is not None else "N/A"
-            color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
-            st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
-                        f'<span class="rt-price" style="color:{color};">{price_str}</span></div>',
-                        unsafe_allow_html=True)
-
-    with col2:
-        st.markdown('<div class="rt-header">PJM</div>', unsafe_allow_html=True)
-        for name, info in PJM_NODES.items():
-            price = gs_get_pjm_rt_price(info["gs_id"])
-            price_str = f"${price:.2f}" if price is not None else "N/A"
-            color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
-            st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
-                        f'<span class="rt-price" style="color:{color};">{price_str}</span></div>',
-                        unsafe_allow_html=True)
-
-    with col3:
-        st.markdown('<div class="rt-header">CAISO</div>', unsafe_allow_html=True)
-        for name, info in CAISO_NODES.items():
-            price = gs_get_caiso_rt_price(info["gs_loc"])
-            price_str = f"${price:.2f}" if price is not None else "N/A"
-            color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
-            st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
-                        f'<span class="rt-price" style="color:{color};">{price_str}</span></div>',
-                        unsafe_allow_html=True)
-
-def render_ercot_node(display_name, settlement_point, date_str, current_he):
+def render_ercot_node(display_name, settlement_point, date_str, current_he, gs_latest=None):
     rt_df, current_rt = None, None
+    # Use gridstatus latest price if available (~2 min lag vs ~17 min API)
+    if gs_latest and settlement_point in gs_latest:
+        current_rt = gs_latest[settlement_point][0]
     try:
-        rt_df, current_rt = fetch_ercot_rt(settlement_point, date_str)
+        rt_df, api_rt = fetch_ercot_rt(settlement_point, date_str)
+        if current_rt is None:
+            current_rt = api_rt
     except Exception as e:
         logger.error(f"ERCOT RT failed for {display_name}: {e}")
     da_df = None
@@ -459,8 +449,9 @@ def render_ercot_node(display_name, settlement_point, date_str, current_he):
     render_price_boxes(display_name, current_da, current_rt)
     fig = create_price_chart(da_df, rt_df)
     st.plotly_chart(fig, use_container_width=True, key=f"chart_ercot_{settlement_point}")
-def render_pjm_node(display_name, node_info, date_str, current_he):
-    pnode_name = node_info["pnode_name"]
+
+
+def render_pjm_node(display_name, pnode_name, date_str, current_he):
     rt_df, current_rt = None, None
     try:
         rt_df, current_rt = fetch_pjm_rt(pnode_name, date_str)
@@ -478,17 +469,18 @@ def render_pjm_node(display_name, node_info, date_str, current_he):
             current_da = da_row['DA_Price'].iloc[0]
     render_price_boxes(display_name, current_da, current_rt)
     fig = create_price_chart(da_df, rt_df)
-    st.plotly_chart(fig, use_container_width=True, key=f"chart_pjm_{node_info['gs_id']}_{display_name}")
-def render_caiso_node(display_name, node_info, date_str, current_he):
-    yes_id = node_info["yes_id"]
+    st.plotly_chart(fig, use_container_width=True, key=f"chart_pjm_{hash(pnode_name)}_{display_name}")
+
+
+def render_caiso_node(display_name, objectid, date_str, current_he):
     rt_df, current_rt = None, None
     try:
-        rt_df, current_rt = fetch_caiso_rt(yes_id, date_str)
+        rt_df, current_rt = fetch_caiso_rt(objectid, date_str)
     except Exception as e:
         logger.error(f"CAISO RT failed for {display_name}: {e}")
     da_df = None
     try:
-        da_df = fetch_caiso_da(yes_id, date_str)
+        da_df = fetch_caiso_da(objectid, date_str)
     except Exception as e:
         logger.error(f"CAISO DA failed for {display_name}: {e}")
     current_da = None
@@ -498,14 +490,19 @@ def render_caiso_node(display_name, node_info, date_str, current_he):
             current_da = da_row['DA_Price'].iloc[0]
     render_price_boxes(display_name, current_da, current_rt)
     fig = create_price_chart(da_df, rt_df)
-    st.plotly_chart(fig, use_container_width=True, key=f"chart_caiso_{yes_id}")
+    st.plotly_chart(fig, use_container_width=True, key=f"chart_caiso_{objectid}")
+
+
 def render_ercot_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
+    gs_latest = fetch_ercot_rt_latest_gs()
     cols = st.columns(len(ERCOT_NODES))
     for i, (name, sp) in enumerate(ERCOT_NODES.items()):
         with cols[i]:
-            render_ercot_node(name, sp, date_str, current_he)
+            render_ercot_node(name, sp, date_str, current_he, gs_latest)
+
+
 def render_pjm_tab():
     now_et = datetime.now(EASTERN_TZ)
     date_str = now_et.strftime('%Y-%m-%d')
@@ -514,21 +511,98 @@ def render_pjm_tab():
     row1 = st.columns(4)
     for i in range(4):
         with row1[i]:
-            name, info = pjm_list[i]
-            render_pjm_node(name, info, date_str, current_he)
+            name, pnode = pjm_list[i]
+            render_pjm_node(name, pnode, date_str, current_he)
     row2 = st.columns(4)
     for i in range(4, 8):
         with row2[i - 4]:
-            name, info = pjm_list[i]
-            render_pjm_node(name, info, date_str, current_he)
+            name, pnode = pjm_list[i]
+            render_pjm_node(name, pnode, date_str, current_he)
+
+
 def render_caiso_tab():
-    now_pt = datetime.now(PACIFIC_TZ)
-    date_str = now_pt.strftime('%Y-%m-%d')
-    current_he = now_pt.hour + 1
+    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    current_he = get_current_he()
     cols = st.columns(len(CAISO_NODES))
-    for i, (name, info) in enumerate(CAISO_NODES.items()):
+    for i, (name, oid) in enumerate(CAISO_NODES.items()):
         with cols[i]:
-            render_caiso_node(name, info, date_str, current_he)
+            render_caiso_node(name, oid, date_str, current_he)
+
+
+def _get_rt_price_ercot(sp, date_str, gs_latest=None):
+    if gs_latest and sp in gs_latest:
+        return gs_latest[sp][0]
+    try:
+        _, price = fetch_ercot_rt(sp, date_str)
+        return price
+    except Exception:
+        return None
+
+
+def _get_rt_price_pjm(pnode, date_str):
+    try:
+        _, price = fetch_pjm_rt(pnode, date_str)
+        return price
+    except Exception:
+        return None
+
+
+def _get_rt_price_caiso(oid, date_str):
+    try:
+        _, price = fetch_caiso_rt(oid, date_str)
+        return price
+    except Exception:
+        return None
+
+
+def render_all_rt_tab():
+    ercot_date = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    pjm_date = datetime.now(EASTERN_TZ).strftime('%Y-%m-%d')
+    gs_latest = fetch_ercot_rt_latest_gs()
+
+    st.markdown("""
+    <style>
+        .rt-header { font-size: 24px; font-weight: bold; color: #ffffff;
+                     margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444; }
+        .rt-row { display: flex; justify-content: space-between; padding: 8px 0;
+                  border-bottom: 1px solid #333; }
+        .rt-asset { font-size: 18px; color: #ffffff; }
+        .rt-price { font-size: 18px; font-weight: bold; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown('<div class="rt-header">ERCOT</div>', unsafe_allow_html=True)
+        for name, sp in ERCOT_NODES.items():
+            price = _get_rt_price_ercot(sp, ercot_date, gs_latest)
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+            color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
+            st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
+                        f'<span class="rt-price" style="color:{color};">{price_str}</span></div>',
+                        unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="rt-header">PJM</div>', unsafe_allow_html=True)
+        for name, pnode in PJM_NODES.items():
+            price = _get_rt_price_pjm(pnode, pjm_date)
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+            color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
+            st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
+                        f'<span class="rt-price" style="color:{color};">{price_str}</span></div>',
+                        unsafe_allow_html=True)
+
+    with col3:
+        st.markdown('<div class="rt-header">CAISO</div>', unsafe_allow_html=True)
+        for name, oid in CAISO_NODES.items():
+            price = _get_rt_price_caiso(oid, ercot_date)
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+            color = "#00ff00" if price is not None and price >= 0 else "#ff4444" if price is not None else "#888"
+            st.markdown(f'<div class="rt-row"><span class="rt-asset">{name}</span>'
+                        f'<span class="rt-price" style="color:{color};">{price_str}</span></div>',
+                        unsafe_allow_html=True)
+
 
 def main():
     st.markdown('<div class="main-title">LRE Asset Dashboard</div>', unsafe_allow_html=True)
@@ -566,5 +640,7 @@ def main():
         render_pjm_tab()
     with tab_caiso:
         render_caiso_tab()
+
+
 if __name__ == "__main__":
     main()
