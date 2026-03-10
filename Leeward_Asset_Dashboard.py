@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 CENTRAL_TZ = ZoneInfo("America/Chicago")
 EASTERN_TZ = ZoneInfo("America/New_York")
 
-st.set_page_config(page_title="Leeward Asset Dashboard", layout="wide")
+st.set_page_config(page_title="LRE Asset Dashboard", layout="wide")
 
 st.markdown("""
 <style>
