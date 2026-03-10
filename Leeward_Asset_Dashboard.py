@@ -8,23 +8,19 @@ import re
 import time
 import logging
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 CENTRAL_TZ = ZoneInfo("America/Chicago")
-
+EASTERN_TZ = ZoneInfo("America/New_York")
 
 st.set_page_config(
     page_title="Leeward Asset Dashboard",
     layout="wide"
 )
 
-
 st.markdown("""
 <style>
-    /* Force dark mode */
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], 
     [data-testid="stToolbar"], [data-testid="stDecoration"], 
     [data-testid="stStatusWidget"], .main, section[data-testid="stSidebar"] {
@@ -32,10 +28,8 @@ st.markdown("""
         color: #ffffff !important;
     }
     
-    /* Main container */
     .main .block-container { padding-top: 1rem; max-width: 100%; }
     
-    /* Tabs styling */
     .stTabs [data-baseweb="tab-list"] { 
         gap: 20px; 
         background-color: #1a1a1a;
@@ -51,7 +45,6 @@ st.markdown("""
         background-color: #333 !important;
     }
     
-    /* Button styling */
     .stButton > button {
         background-color: #333 !important;
         color: #ffffff !important;
@@ -99,10 +92,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
-
 
 ERCOT_NODES = {
     "Horizon Solar": 10017137187,
@@ -128,26 +119,22 @@ CAISO_NODES = {
     "Kumeyaay Wind": 20000004301,
 }
 
-# API Configuration
 API_TIMEOUT = 30
 API_RETRY_ATTEMPTS = 3
-API_RETRY_DELAY = 2 
-API_CALL_SPACING = 0.15  
-_last_api_call_time = 0.0  
-
+API_RETRY_DELAY = 2
+API_CALL_SPACING = 0.15
+_last_api_call_time = 0.0
 
 _yes_session = requests.Session()
-_yes_session.auth = None  # auth set per-call after secrets load
+_yes_session.auth = None
 
 
-def get_current_he():
-    
-    now = datetime.now(CENTRAL_TZ)
+def get_current_he(tz=CENTRAL_TZ):
+    now = datetime.now(tz)
     return now.hour + 1
 
 
 def parse_yes_html_table(html_text):
-
     if not html_text or not isinstance(html_text, str):
         return None
     
@@ -176,13 +163,11 @@ def parse_yes_html_table(html_text):
 
 
 def _fetch_with_retry(url: str, description: str) -> requests.Response:
-    
     global _last_api_call_time
     last_error = None
     
     for attempt in range(1, API_RETRY_ATTEMPTS + 1):
         try:
-            # Self-throttle: enforce minimum spacing between API calls
             elapsed = time.time() - _last_api_call_time
             if elapsed < API_CALL_SPACING:
                 time.sleep(API_CALL_SPACING - elapsed)
@@ -193,7 +178,6 @@ def _fetch_with_retry(url: str, description: str) -> requests.Response:
             if response.ok:
                 return response
             elif response.status_code == 429:
-                # Rate limited - back off more aggressively
                 retry_after = int(response.headers.get('Retry-After', API_RETRY_DELAY * attempt * 2))
                 last_error = f"{description} rate limited (429), backing off {retry_after}s"
                 logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
@@ -209,18 +193,14 @@ def _fetch_with_retry(url: str, description: str) -> requests.Response:
             last_error = f"{description} request failed: {e}"
             logger.warning(f"Attempt {attempt}/{API_RETRY_ATTEMPTS}: {last_error}")
         
-
         if attempt < API_RETRY_ATTEMPTS:
             time.sleep(API_RETRY_DELAY * attempt)
     
     raise Exception(last_error)
 
 
-
-
-@st.cache_data(ttl=60)  # 60s TTL - expires before 5-min refresh cycle, ensures fresh RT data
+@st.cache_data(ttl=60)
 def fetch_rt_5min(objectid, date_str):
-
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     
@@ -237,7 +217,6 @@ def fetch_rt_5min(objectid, date_str):
     df['time_hrs'] = df['datetime'].dt.hour + df['datetime'].dt.minute / 60.0
     df = df.sort_values('datetime')
     
-
     valid_prices = df.dropna(subset=['RT_Price'])
     if valid_prices.empty:
         raise Exception(f"No valid RT prices found for {objectid}")
@@ -248,9 +227,8 @@ def fetch_rt_5min(objectid, date_str):
     return df[['time_hrs', 'RT_Price']].copy(), latest
 
 
-@st.cache_data(ttl=86400)  # 24h TTL - DA prices are static for the day, fetch once
+@st.cache_data(ttl=86400)
 def fetch_da_hourly(objectid, date_str):
-
     dt = datetime.strptime(date_str, '%Y-%m-%d')
     yes_date = dt.strftime('%m/%d/%Y')
     
@@ -274,8 +252,6 @@ def fetch_da_hourly(objectid, date_str):
     
     logger.info(f"DA fetch success for {objectid}: {len(df)} hours")
     return df[['HE', 'DA_Price']].copy()
-
-
 
 
 def render_price_boxes(display_name, da_price, rt_price):
@@ -312,10 +288,8 @@ def render_price_boxes(display_name, da_price, rt_price):
 
 
 def create_price_chart(da_df, rt_5min_df):
-
     fig = go.Figure()
     
-    # RT line (white) - 5-min data
     if rt_5min_df is not None and not rt_5min_df.empty:
         fig.add_trace(
             go.Scatter(
@@ -328,7 +302,6 @@ def create_price_chart(da_df, rt_5min_df):
             )
         )
     
-
     if da_df is not None and not da_df.empty:
         da_x = []
         da_y = []
@@ -390,8 +363,6 @@ def create_price_chart(da_df, rt_5min_df):
 
 
 def render_node(display_name, objectid, date_str, current_he):
-
-
     rt_5min_df = None
     current_rt = None
     try:
@@ -399,14 +370,12 @@ def render_node(display_name, objectid, date_str, current_he):
     except Exception as e:
         logger.error(f"RT fetch failed for {display_name}: {e}")
     
-
     da_df = None
     try:
         da_df = fetch_da_hourly(objectid, date_str)
     except Exception as e:
         logger.error(f"DA fetch failed for {display_name}: {e}")
     
-
     current_da = None
     if da_df is not None and not da_df.empty:
         da_row = da_df[da_df['HE'] == current_he]
@@ -421,7 +390,7 @@ def render_node(display_name, objectid, date_str, current_he):
 
 def render_ercot_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    current_he = get_current_he()
+    current_he = get_current_he(CENTRAL_TZ)
     
     ercot_cols = st.columns(len(ERCOT_NODES))
     
@@ -431,8 +400,8 @@ def render_ercot_tab():
 
 
 def render_pjm_tab():
-    date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    current_he = get_current_he()
+    date_str = datetime.now(EASTERN_TZ).strftime('%Y-%m-%d')
+    current_he = get_current_he(EASTERN_TZ)
     
     pjm_list = list(PJM_NODES.items())
     
@@ -451,7 +420,7 @@ def render_pjm_tab():
 
 def render_caiso_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
-    current_he = get_current_he()
+    current_he = get_current_he(CENTRAL_TZ)
     
     caiso_cols = st.columns(len(CAISO_NODES))
     
@@ -461,7 +430,6 @@ def render_caiso_tab():
 
 
 def _get_rt_price(objectid, date_str):
-
     try:
         _, current_rt = fetch_rt_5min(objectid, date_str)
         return current_rt
@@ -470,12 +438,11 @@ def _get_rt_price(objectid, date_str):
 
 
 def render_all_rt_tab():
-
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
+    pjm_date_str = datetime.now(EASTERN_TZ).strftime('%Y-%m-%d')
     
     col1, col2, col3 = st.columns(3)
     
-
     st.markdown("""
     <style>
         .rt-header {
@@ -503,10 +470,10 @@ def render_all_rt_tab():
     </style>
     """, unsafe_allow_html=True)
     
-    def render_iso_column(iso_name, nodes_dict):
+    def render_iso_column(iso_name, nodes_dict, ds):
         st.markdown(f'<div class="rt-header">{iso_name}</div>', unsafe_allow_html=True)
         for display_name, objectid in nodes_dict.items():
-            current_rt = _get_rt_price(objectid, date_str)
+            current_rt = _get_rt_price(objectid, ds)
             
             if current_rt is not None:
                 price_str = f"${current_rt:.2f}"
@@ -523,33 +490,33 @@ def render_all_rt_tab():
             ''', unsafe_allow_html=True)
     
     with col1:
-        render_iso_column("ERCOT", ERCOT_NODES)
+        render_iso_column("ERCOT", ERCOT_NODES, date_str)
     
     with col2:
-        render_iso_column("PJM", PJM_NODES)
+        render_iso_column("PJM", PJM_NODES, pjm_date_str)
     
     with col3:
-        render_iso_column("CAISO", CAISO_NODES)
+        render_iso_column("CAISO", CAISO_NODES, date_str)
 
 
 def main():
     st.markdown('<div class="main-title">Leeward Asset Dashboard</div>', unsafe_allow_html=True)
     
     now = datetime.now(CENTRAL_TZ)
-    current_he = get_current_he()
+    current_he = get_current_he(CENTRAL_TZ)
     
-    # Calculate next 5-min interval refresh time
     current_minute = now.minute
-    next_5min = ((current_minute // 5) + 1) * 5
-    if next_5min >= 60:
-        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=35, microsecond=0)
-    else:
-        next_5min_refresh = now.replace(minute=next_5min, second=35, microsecond=0)
-    if (next_5min_refresh - now).total_seconds() < 5:
-        next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
+    last_5min_mark = (current_minute // 5) * 5
+    next_refresh = now.replace(minute=last_5min_mark, second=0, microsecond=0) + timedelta(minutes=1, seconds=15)
+    if next_refresh <= now:
+        next_5min_mark = last_5min_mark + 5
+        if next_5min_mark >= 60:
+            next_refresh = (now + timedelta(hours=1)).replace(minute=next_5min_mark - 60, second=0, microsecond=0) + timedelta(minutes=1, seconds=15)
+        else:
+            next_refresh = now.replace(minute=next_5min_mark, second=0, microsecond=0) + timedelta(minutes=1, seconds=15)
+    next_5min_refresh = next_refresh
     
     seconds_until_refresh = int((next_5min_refresh - now).total_seconds())
-    
     
     st.markdown(f'<meta http-equiv="refresh" content="{seconds_until_refresh}">', unsafe_allow_html=True)
     
