@@ -15,45 +15,42 @@ logger = logging.getLogger(__name__)
 CENTRAL_TZ = ZoneInfo("America/Chicago")
 EASTERN_TZ = ZoneInfo("America/New_York")
 
-st.set_page_config(page_title="LRE Asset Dashboard", layout="wide")
+st.set_page_config(page_title="Leeward Asset Dashboard", layout="wide")
 
 st.markdown("""
 <style>
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"], 
     [data-testid="stToolbar"], [data-testid="stDecoration"], 
     [data-testid="stStatusWidget"], .main, section[data-testid="stSidebar"] {
-        background-color: #1a1a1a !important;
-        color: #ffffff !important;
+        background-color:
+        color:
     }
     .main .block-container { padding-top: 1rem; max-width: 100%; }
-    .stTabs [data-baseweb="tab-list"] { gap: 20px; background-color: #1a1a1a; }
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; background-color:
     .stTabs [data-baseweb="tab"] {
         font-size: 20px; font-weight: bold; padding: 15px 30px;
-        color: #ffffff !important; background-color: #1a1a1a !important;
+        color:
     }
-    .stTabs [aria-selected="true"] { background-color: #333 !important; }
+    .stTabs [aria-selected="true"] { background-color:
     .stButton > button {
-        background-color: #333 !important; color: #ffffff !important;
-        border: 1px solid #555 !important;
+        background-color:
+        border: 1px solid
     }
-    .main-title { font-size: 48px; font-weight: bold; color: #ffffff; margin-bottom: 5px; }
+    .main-title { font-size: 48px; font-weight: bold; color:
     .price-box {
-        background-color: #0d0d0d; border: 1px solid #333;
+        background-color:
         padding: 15px 20px; text-align: center; margin-bottom: 5px;
     }
-    .node-label { font-size: 18px; color: #ffffff; font-weight: bold; margin-bottom: 5px; }
-    .data-type { font-size: 14px; color: #888; margin-bottom: 8px; }
+    .node-label { font-size: 18px; color:
+    .data-type { font-size: 14px; color:
     .price-value { font-size: 48px; font-weight: bold; margin: 10px 0; }
-    .price-green { color: #00ff00; }
-    .price-red { color: #ff4444; }
-    .refresh-text { font-size: 18px; color: #888; margin-bottom: 20px; }
+    .price-green { color:
+    .price-red { color:
+    .refresh-text { font-size: 18px; color:
 </style>
 """, unsafe_allow_html=True)
 
 
-
-
-# ERCOT
 ERCOT_NODES = {
     "Horizon Solar":  "HRZN_SLR_UN1",
     "Sweetwater":     "SWEETWN3_3",
@@ -61,7 +58,6 @@ ERCOT_NODES = {
     "Morrow Solar":   "MROW_SLR_RN",
 }
 
-# PJM:
 PJM_NODES = {
     "Big Plain Solar":  "DEERCR  34.5 KV BIGPL2SP",
     "Oak Trail Solar":  "PUDDNRID34.5 KV OAKTRASP",
@@ -73,7 +69,6 @@ PJM_NODES = {
     "GSG Westbrook":    "139 MEND34.5 KV WBROOKWF",
 }
 
-# CAISO: 
 CAISO_NODES = {
     "White Wing Ranch":    10017280372,
     "Sierra Pinta Battery": 10018494391,
@@ -83,8 +78,6 @@ CAISO_NODES = {
 API_TIMEOUT = 30
 API_RETRY_ATTEMPTS = 3
 API_RETRY_DELAY = 2
-
-
 
 
 def _ercot_auth():
@@ -115,7 +108,6 @@ def _pjm_headers():
     return {"Ocp-Apim-Subscription-Key": st.secrets["pjm"]["subscription_key"]}
 
 
-# YES Energy (for CAISO only)
 YES_AUTH = (st.secrets["yes_energy"]["username"], st.secrets["yes_energy"]["password"])
 YES_BASE = 'https://services.yesenergy.com/PS/rest'
 
@@ -125,9 +117,6 @@ def get_current_he():
     return now.hour + 1
 
 
-
-
-@st.cache_data(ttl=60)
 def fetch_ercot_rt(settlement_point, date_str):
     """Fetch 5-min SCED LMPs from np6-788-cd, return (df[time_hrs, RT_Price], latest_price)."""
     auths = _ercot_auth()
@@ -178,7 +167,6 @@ def fetch_ercot_da(settlement_point, date_str):
     fields = [f['name'] for f in result.get("fields", [])]
     df = pd.DataFrame(rows, columns=fields)
     df['DA_Price'] = pd.to_numeric(df['settlementPointPrice'], errors='coerce')
-    # hourEnding is '01:00' format
     if df['hourEnding'].dtype == 'object' and df['hourEnding'].str.contains(':').any():
         df['HE'] = df['hourEnding'].str.split(':').str[0].astype(int)
     else:
@@ -189,17 +177,21 @@ def fetch_ercot_da(settlement_point, date_str):
     return df[['HE', 'DA_Price']].copy()
 
 
-
-
-@st.cache_data(ttl=60)
 def fetch_pjm_rt(pnode_name, date_str):
-    """Fetch unverified hourly RT LMP from PJM, return (df[time_hrs, RT_Price], latest_price).
-    Uses rt_unverified_hrl_lmps with pnode_name filter (same as Optimization.py)."""
+    """Fetch unverified 5-min RT LMP from PJM, return (df[time_hrs, RT_Price], latest_price).
+    Uses rt_unverified_fivemin_lmps with pnode_id for 5-min granularity."""
+    pnode_id = _get_pjm_pnode_id(pnode_name)
+    if not pnode_id:
+        raise Exception(f"Could not find pnode_id for {pnode_name}")
     hdrs = _pjm_headers()
+    date_filter = f"{date_str} 00:00 to {date_str} 23:59"
     url = (
-        f"https://api.pjm.com/api/v1/rt_unverified_hrl_lmps"
-        f"?pnode_name={quote(pnode_name)}"
-        f"&rowCount=50000&startRow=1&download=true"
+        f"https://api.pjm.com/api/v1/rt_unverified_fivemin_lmps"
+        f"?download=true&rowCount=50000"
+        f"&sort=datetime_beginning_ept&order=Asc&startRow=1"
+        f"&datetime_beginning_ept={quote(date_filter)}"
+        f"&pnode_id={pnode_id}"
+        f"&fields=datetime_beginning_ept,total_lmp_rt,pnode_id"
     )
     resp = requests.get(url, headers=hdrs, timeout=API_TIMEOUT)
     if not resp.ok:
@@ -211,11 +203,6 @@ def fetch_pjm_rt(pnode_name, date_str):
     if 'total_lmp_rt' not in df.columns:
         raise Exception(f"No total_lmp_rt in PJM response")
     df['datetime'] = pd.to_datetime(df['datetime_beginning_ept'])
-    # Filter to requested date (EPT)
-    df['date_str'] = df['datetime'].dt.strftime('%Y-%m-%d')
-    df = df[df['date_str'] == date_str]
-    if df.empty:
-        raise Exception(f"No PJM RT data for {pnode_name} on {date_str}")
     df['RT_Price'] = pd.to_numeric(df['total_lmp_rt'], errors='coerce')
     df['time_hrs'] = df['datetime'].dt.hour + df['datetime'].dt.minute / 60.0
     df = df.dropna(subset=['RT_Price']).sort_values('datetime')
@@ -238,11 +225,9 @@ def _get_pjm_pnode_id(pnode_name):
         if resp.ok:
             data = resp.json()
             if data:
-                # Exact match first
                 for item in data:
                     if item.get('pnode_name', '').upper() == pnode_name.upper():
                         return item.get('pnode_id')
-                # Fallback to first result
                 return data[0].get('pnode_id')
     except Exception:
         pass
@@ -279,7 +264,6 @@ def fetch_pjm_da(pnode_name, date_str):
     df['DA_Price'] = pd.to_numeric(df['total_lmp_da'], errors='coerce')
     df = df.dropna(subset=['DA_Price']).sort_values('HE')
     return df[['HE', 'DA_Price']].copy()
-
 
 
 def parse_yes_html_table(html_text):
@@ -319,7 +303,6 @@ def _fetch_yes_with_retry(url, description):
     raise Exception(last_error)
 
 
-@st.cache_data(ttl=60)
 def fetch_caiso_rt(objectid, date_str):
     """Fetch 5-min RT LMP from YES Energy for CAISO."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
@@ -358,7 +341,6 @@ def fetch_caiso_da(objectid, date_str):
         df['HE'] = df['datetime'].dt.hour + 1
     df = df.sort_values('HE')
     return df[['HE', 'DA_Price']].copy()
-
 
 
 def render_price_boxes(display_name, da_price, rt_price):
@@ -419,8 +401,6 @@ def create_price_chart(da_df, rt_5min_df):
                    showline=True, linecolor='#666', tickprefix='$')
     )
     return fig
-
-
 
 
 def render_ercot_node(display_name, settlement_point, date_str, current_he):
@@ -551,11 +531,11 @@ def render_all_rt_tab():
 
     st.markdown("""
     <style>
-        .rt-header { font-size: 24px; font-weight: bold; color: #ffffff;
-                     margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #444; }
+        .rt-header { font-size: 24px; font-weight: bold; color:
+                     margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid
         .rt-row { display: flex; justify-content: space-between; padding: 8px 0;
-                  border-bottom: 1px solid #333; }
-        .rt-asset { font-size: 18px; color: #ffffff; }
+                  border-bottom: 1px solid
+        .rt-asset { font-size: 18px; color:
         .rt-price { font-size: 18px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
