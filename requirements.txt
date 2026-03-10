@@ -6,4 +6,4 @@ gridstatus
 pytz
 tzdata
 beautifulsoup4
-gridstatusio
+gridstatusio>=0.6.3
