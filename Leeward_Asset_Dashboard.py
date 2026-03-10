@@ -128,7 +128,8 @@ def fetch_ercot_rt(settlement_point, date_str):
     url = (
         f"https://api.ercot.com/api/public-reports/np6-788-cd/lmp_node_zone_hub"
         f"?SCEDTimestampFrom={date_str}T00:00:00&SCEDTimestampTo={date_str}T23:59:59"
-        f"&settlementPoint={settlement_point}&size=200000"
+        f"&settlementPoint={settlement_point}&size=500"
+        f"&sort=SCEDTimestamp&sortDir=desc"
     )
     resp = requests.get(url, headers=auths, timeout=API_TIMEOUT)
     if not resp.ok:
@@ -190,8 +191,8 @@ def fetch_pjm_rt(pnode_name, date_str):
     date_filter = f"{date_str} 00:00 to {date_str} 23:59"
     url = (
         f"https://api.pjm.com/api/v1/rt_unverified_fivemin_lmps"
-        f"?download=true&rowCount=50000"
-        f"&sort=datetime_beginning_ept&order=Asc&startRow=1"
+        f"?download=true&rowCount=2000"
+        f"&sort=datetime_beginning_ept&order=Desc&startRow=1"
         f"&datetime_beginning_ept={quote(date_filter)}"
         f"&pnode_id={pnode_id}"
         f"&fields=datetime_beginning_ept,total_lmp_rt,pnode_id"
