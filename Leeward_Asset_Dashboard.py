@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import re
 import time
 import logging
-from gridstatusio import GridStatusClient
+from gridstatusio.gs_client import GridStatusClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ CENTRAL_TZ = ZoneInfo("America/Chicago")
 EASTERN_TZ = ZoneInfo("America/New_York")
 PACIFIC_TZ = ZoneInfo("US/Pacific")
 
-st.set_page_config(page_title="LRE Dashboard", layout="wide")
+st.set_page_config(page_title="LRE Asset Dashboard", layout="wide")
 
 st.markdown("""
 <style>
