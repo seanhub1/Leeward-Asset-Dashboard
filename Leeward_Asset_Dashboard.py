@@ -611,13 +611,12 @@ def main():
     current_he = get_current_he()
 
     current_minute = now.minute
-    next_5min = ((current_minute // 5) + 1) * 5
-    if next_5min >= 60:
-        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=35, microsecond=0)
-    else:
-        next_5min_refresh = now.replace(minute=next_5min, second=35, microsecond=0)
+    last_5min = (current_minute // 5) * 5
+    next_5min_refresh = now.replace(minute=last_5min, second=0, microsecond=0) + timedelta(minutes=6, seconds=10)
+    if next_5min_refresh < now:
+        next_5min_refresh += timedelta(minutes=5)
     if (next_5min_refresh - now).total_seconds() < 5:
-        next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
+        next_5min_refresh += timedelta(minutes=5)
 
     seconds_until_refresh = int((next_5min_refresh - now).total_seconds())
     st.markdown(f'<meta http-equiv="refresh" content="{seconds_until_refresh}">', unsafe_allow_html=True)
