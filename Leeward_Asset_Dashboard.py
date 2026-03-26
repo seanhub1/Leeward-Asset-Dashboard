@@ -115,13 +115,33 @@ YES_BASE = 'https://services.yesenergy.com/PS/rest'
 GS_ERCOT = gridstatus.Ercot()
 
 
-def fetch_ercot_rt_latest_gs():
-    """Fetch latest SCED LMPs via gridstatus (MIS CSV) — ~2 min lag.
-    Returns dict of {settlement_point: (lmp, timestamp)}."""
+if "last_fetch_times" not in st.session_state:
+    st.session_state["last_fetch_times"] = {}
+
+def _record_fetch(key: str):
+    """Mark *now* as the moment fresh data was pulled for `key`."""
+    st.session_state["last_fetch_times"][key] = datetime.now(CENTRAL_TZ)
+
+def _latest_fetch_time() -> datetime | None:
+    
+    times = st.session_state["last_fetch_times"]
+    return max(times.values()) if times else None
+
+
+def _5min_cache_key() -> str:
+
+    now = datetime.now(CENTRAL_TZ)
+    return now.strftime("%Y-%m-%d-%H-") + str(now.minute // 5)
+
+
+@st.cache_data(ttl=300)
+def fetch_ercot_rt_latest_gs(_cache_key: str = ""):
+
     try:
         df = GS_ERCOT.get_lmp("latest", verbose=False)
         if df is None or df.empty:
             return {}
+        _record_fetch("ercot_rt_gs")
         ts_col = "Interval Start" if "Interval Start" in df.columns else "SCED Timestamp"
         out = {}
         for _, row in df.iterrows():
@@ -139,8 +159,9 @@ def get_current_he():
     return now.hour + 1
 
 
+@st.cache_data(ttl=300)
 def fetch_ercot_rt(settlement_point, date_str):
-    """Fetch 5-min SCED LMPs from np6-788-cd, return (df[time_hrs, RT_Price], latest_price)."""
+    
     auths = _ercot_auth()
     if not auths:
         raise Exception("ERCOT auth failed")
@@ -156,6 +177,7 @@ def fetch_ercot_rt(settlement_point, date_str):
     rows = result.get("data", [])
     if not rows:
         raise Exception(f"No RT data for {settlement_point}")
+    _record_fetch(f"ercot_rt_{settlement_point}")
     fields = [f['name'] for f in result.get("fields", [])]
     df = pd.DataFrame(rows, columns=fields)
     df['LMP'] = pd.to_numeric(df['LMP'], errors='coerce')
@@ -170,7 +192,7 @@ def fetch_ercot_rt(settlement_point, date_str):
 
 @st.cache_data(ttl=3600)
 def fetch_ercot_da(settlement_point, date_str):
-    """Fetch DAM SPP from np4-190-cd, return df[HE, DA_Price]."""
+   
     auths = _ercot_auth()
     if not auths:
         raise Exception("ERCOT auth failed")
@@ -186,6 +208,7 @@ def fetch_ercot_da(settlement_point, date_str):
     rows = result.get("data", [])
     if not rows:
         raise Exception(f"No DA data for {settlement_point}")
+    _record_fetch(f"ercot_da_{settlement_point}")
     fields = [f['name'] for f in result.get("fields", [])]
     df = pd.DataFrame(rows, columns=fields)
     df['DA_Price'] = pd.to_numeric(df['settlementPointPrice'], errors='coerce')
@@ -199,9 +222,9 @@ def fetch_ercot_da(settlement_point, date_str):
     return df[['HE', 'DA_Price']].copy()
 
 
+@st.cache_data(ttl=300)
 def fetch_pjm_rt(pnode_name, date_str):
-    """Fetch unverified 5-min RT LMP from PJM, return (df[time_hrs, RT_Price], latest_price).
-    Uses rt_unverified_fivemin_lmps with pnode_id for 5-min granularity."""
+
     pnode_id = _get_pjm_pnode_id(pnode_name)
     if not pnode_id:
         raise Exception(f"Could not find pnode_id for {pnode_name}")
@@ -221,6 +244,7 @@ def fetch_pjm_rt(pnode_name, date_str):
     data = resp.json()
     if not data:
         raise Exception(f"No PJM RT data for {pnode_name}")
+    _record_fetch(f"pjm_rt_{pnode_name}")
     df = pd.json_normalize(data)
     if 'total_lmp_rt' not in df.columns:
         raise Exception(f"No total_lmp_rt in PJM response")
@@ -234,7 +258,7 @@ def fetch_pjm_rt(pnode_name, date_str):
 
 @st.cache_data(ttl=86400)
 def _get_pjm_pnode_id(pnode_name):
-    """Look up pnode_id from pnode_name via PJM pnode API. Cached for the day."""
+   
     hdrs = _pjm_headers()
     url = (
         f"https://api.pjm.com/api/v1/pnode"
@@ -258,8 +282,7 @@ def _get_pjm_pnode_id(pnode_name):
 
 @st.cache_data(ttl=3600)
 def fetch_pjm_da(pnode_name, date_str):
-    """Fetch DA hourly LMP from PJM, return df[HE, DA_Price].
-    Looks up pnode_id first (cached), then queries da_hrl_lmps by pnode_id."""
+
     pnode_id = _get_pjm_pnode_id(pnode_name)
     if not pnode_id:
         raise Exception(f"Could not find pnode_id for {pnode_name}")
@@ -278,6 +301,7 @@ def fetch_pjm_da(pnode_name, date_str):
     data = resp.json()
     if not data:
         raise Exception(f"No PJM DA data for {pnode_name} (pnode_id={pnode_id})")
+    _record_fetch(f"pjm_da_{pnode_name}")
     df = pd.json_normalize(data)
     if 'total_lmp_da' not in df.columns:
         raise Exception(f"No total_lmp_da in PJM response")
@@ -325,6 +349,7 @@ def _fetch_yes_with_retry(url, description):
     raise Exception(last_error)
 
 
+@st.cache_data(ttl=300)
 def fetch_caiso_rt(objectid, date_str):
     """Fetch 5-min RT LMP from YES Energy for CAISO."""
     dt = datetime.strptime(date_str, '%Y-%m-%d')
@@ -334,6 +359,7 @@ def fetch_caiso_rt(objectid, date_str):
     df = parse_yes_html_table(response.text)
     if df is None or df.empty:
         raise Exception(f"No CAISO RT data for {objectid}")
+    _record_fetch(f"caiso_rt_{objectid}")
     df['datetime'] = pd.to_datetime(df['DATETIME'])
     df['RT_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
     df['time_hrs'] = df['datetime'].dt.hour + df['datetime'].dt.minute / 60.0
@@ -355,6 +381,7 @@ def fetch_caiso_da(objectid, date_str):
     df = parse_yes_html_table(response.text)
     if df is None or df.empty:
         raise Exception(f"No CAISO DA data for {objectid}")
+    _record_fetch(f"caiso_da_{objectid}")
     df['datetime'] = pd.to_datetime(df['DATETIME'])
     df['DA_Price'] = pd.to_numeric(df['AVGVALUE'], errors='coerce')
     if 'HOURENDING' in df.columns:
@@ -496,7 +523,7 @@ def render_caiso_node(display_name, objectid, date_str, current_he):
 def render_ercot_tab():
     date_str = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     current_he = get_current_he()
-    gs_latest = fetch_ercot_rt_latest_gs()
+    gs_latest = fetch_ercot_rt_latest_gs(_cache_key=_5min_cache_key())
     cols = st.columns(len(ERCOT_NODES))
     for i, (name, sp) in enumerate(ERCOT_NODES.items()):
         with cols[i]:
@@ -558,7 +585,7 @@ def _get_rt_price_caiso(oid, date_str):
 def render_all_rt_tab():
     ercot_date = datetime.now(CENTRAL_TZ).strftime('%Y-%m-%d')
     pjm_date = datetime.now(EASTERN_TZ).strftime('%Y-%m-%d')
-    gs_latest = fetch_ercot_rt_latest_gs()
+    gs_latest = fetch_ercot_rt_latest_gs(_cache_key=_5min_cache_key())
 
     st.markdown("""
     <style>
@@ -611,22 +638,24 @@ def main():
     current_he = get_current_he()
 
     current_minute = now.minute
-    last_5min = (current_minute // 5) * 5
-    next_5min_refresh = now.replace(minute=last_5min, second=0, microsecond=0) + timedelta(minutes=6, seconds=10)
-    if next_5min_refresh < now:
-        next_5min_refresh += timedelta(minutes=5)
+    next_5min = ((current_minute // 5) + 1) * 5
+    if next_5min >= 60:
+        next_5min_refresh = (now + timedelta(hours=1)).replace(minute=0, second=35, microsecond=0)
+    else:
+        next_5min_refresh = now.replace(minute=next_5min, second=35, microsecond=0)
     if (next_5min_refresh - now).total_seconds() < 5:
-        next_5min_refresh += timedelta(minutes=5)
+        next_5min_refresh = next_5min_refresh + timedelta(minutes=5)
 
     seconds_until_refresh = int((next_5min_refresh - now).total_seconds())
     st.markdown(f'<meta http-equiv="refresh" content="{seconds_until_refresh}">', unsafe_allow_html=True)
 
     col1, col2 = st.columns([6, 1])
     with col1:
-        st.markdown(f'<p class="refresh-text">Last refresh: {now.strftime("%Y-%m-%d %H:%M:%S")} (HE{current_he}) | Next: {next_5min_refresh.strftime("%H:%M:%S")}</p>', unsafe_allow_html=True)
+        refresh_placeholder = st.empty()
     with col2:
         if st.button("Refresh", use_container_width=True):
             st.cache_data.clear()
+            st.session_state["last_fetch_times"] = {}
             st.rerun()
 
     tab_all_rt, tab_ercot, tab_pjm, tab_caiso = st.tabs(["All - RT", "ERCOT", "PJM", "CAISO"])
@@ -639,6 +668,15 @@ def main():
         render_pjm_tab()
     with tab_caiso:
         render_caiso_tab()
+
+    
+    last_fetched = _latest_fetch_time()
+    fetch_label = last_fetched.strftime("%Y-%m-%d %H:%M:%S") if last_fetched else now.strftime("%Y-%m-%d %H:%M:%S")
+    refresh_placeholder.markdown(
+        f'<p class="refresh-text">Data fetched: {fetch_label} (HE{current_he}) | '
+        f'Next: {next_5min_refresh.strftime("%H:%M:%S")}</p>',
+        unsafe_allow_html=True,
+    )
 
 
 if __name__ == "__main__":
